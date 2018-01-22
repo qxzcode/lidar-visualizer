@@ -80,6 +80,7 @@ public class Display extends JPanel {
     public static final int MIN_POINTS = 5;
     public void cluster() {
         System.out.println("Clustering...");
+        long startTime = System.nanoTime();
         LinkedList<Point> freePoints = new LinkedList<>(Arrays.asList(points));
         while (!freePoints.isEmpty()) {
             // find a cluster
@@ -103,7 +104,8 @@ public class Display extends JPanel {
             }
             cluster.color = cluster.points.size() >= MIN_POINTS? nextColor() : Color.WHITE;
         }
-        System.out.println("Done");
+        long endTime = System.nanoTime();
+        System.out.println("Done ("+((endTime-startTime)/1000000)+" ms)");
     }
     
     public void paint(Graphics g) {
