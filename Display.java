@@ -1,16 +1,18 @@
 import java.awt.event.*;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Graphics;
+import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.image.*;
 import javax.swing.*;
 import javax.imageio.*;
 import java.io.*;
 import java.awt.geom.*;
-import java.lang.Math.*;
 import java.util.*;
 
 class Point {
     public double x, y;
-    public Color color = Color.WHITE;
+    public Cluster cluster;
 
     public Point(double x, double y) {
         this.x = x;
@@ -22,6 +24,16 @@ class Point {
     
     public String toString() {
         return "(" + x + " " + y + ")";
+    }
+}
+
+class Cluster {
+    public Color color;
+    public List<Point> points = new LinkedList<>();
+    
+    public void addPoint(Point p) {
+        points.add(p);
+        p.cluster = this;
     }
 }
 
@@ -58,25 +70,40 @@ public class Display extends JPanel {
         cluster();
     }
     
-    public static final double EPS = 300;
+    public float curHue = 0;
+    public Color nextColor() {
+        curHue += 0.4;
+        return Color.getHSBColor(curHue, 1, 1);
+    }
+    
+    public static final double EPS = 180;
+    public static final int MIN_POINTS = 5;
     public void cluster() {
-        Color curColor = null;
-        float curHue = 0;
-        double lastX = 999999, lastY = 999999;
-        for (int i = 0; ; i++) {
-            Point p = points[i % points.length];
-            double dx = p.x - lastX, dy = p.y - lastY;
-            double distSq = dx*dx + dy*dy;
-            if (distSq > EPS*EPS) {
-                // new cluster
-                if (i >= points.length) break;
-                curHue += 0.4;
-                curColor = Color.getHSBColor(curHue, 1, 1);
+        System.out.println("Clustering...");
+        LinkedList<Point> freePoints = new LinkedList<>(Arrays.asList(points));
+        while (!freePoints.isEmpty()) {
+            // find a cluster
+            LinkedList<Point> openPoints = new LinkedList<>();
+            openPoints.add(freePoints.pop());
+            Cluster cluster = new Cluster();
+            while (!openPoints.isEmpty()) {
+                // find all the neighbors of this point
+                Point cur = openPoints.pop();
+                cluster.addPoint(cur);
+                Iterator<Point> it = freePoints.iterator();
+                while (it.hasNext()) {
+                    Point p = it.next();
+                    double dx = p.x-cur.x, dy = p.y-cur.y;
+                    if (dx*dx + dy*dy <= EPS*EPS) {
+                        // the point is close enough
+                        openPoints.add(p);
+                        it.remove();
+                    }
+                }
             }
-            lastX = p.x;
-            lastY = p.y;
-            p.color = curColor;
+            cluster.color = cluster.points.size() >= MIN_POINTS? nextColor() : Color.WHITE;
         }
+        System.out.println("Done");
     }
     
     public void paint(Graphics g) {
@@ -99,9 +126,9 @@ public class Display extends JPanel {
             yPts[i] = (int) actualY;
         }
         g.setColor(Color.GRAY);
-        g.drawPolygon(xPts, yPts, points.length);
+        // g.drawPolygon(xPts, yPts, points.length);
         for (int i = 0; i < points.length; i++) {
-            g.setColor(points[i].color);
+            g.setColor(points[i].cluster.color);
             g.fillRect(xPts[i] - radius, yPts[i] - radius, radius * 2, radius * 2);
         }
         
@@ -125,7 +152,7 @@ public class Display extends JPanel {
                 double r = Double.parseDouble(polar[1]), theta = Math.toRadians(Double.parseDouble(polar[0]));
                 if (r == 0) continue;
                 double x = r*Math.cos(theta), y = r*Math.sin(theta);
-                points.addLast(new Point(x, y));
+                points.add(new Point(x, y));
                 
                 x = Math.abs(x);
                 if (x > maxX) maxX = x;
