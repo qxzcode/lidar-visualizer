@@ -14,6 +14,8 @@ class Point implements Comparable<Point> {
     public double x, y;
     double theta, dist;
     public Cluster cluster;
+    
+    public double mCos, mSin;
 
     private Point(double x, double y) {
         this.x = x;
@@ -64,28 +66,7 @@ class Line {
         vy /= mag;
     }
     
-    public double getT(double x, double y) {
-        return vx*(x-x0) + vy*(y-y0);
-    }
-    
-    public Point getPoint(double t) {
-        return Point.fromRect(x0 + vx*t, y0 + vy*t);
-    }
-}
-
-class Cluster {
-    public Color color;
-    public List<Point> points = new LinkedList<>();
-    public Line fitLine;
-    public Point fitLineP1, fitLineP2;
-    public double fitLineLength;
-    
-    public void addPoint(Point p) {
-        points.add(p);
-        p.cluster = this;
-    }
-    
-    public void calcFitLine() {
+    public static Line getFitLine(Collection<Point> points) {
         int n = points.size();
         
         double xMean = 0, yMean = 0;
@@ -111,7 +92,32 @@ class Cluster {
         double dsxy = syy - sxx;
         double m = (dsxy + Math.sqrt(dsxy*dsxy + 4*sxy*sxy)) / (2*sxy);
         double b = yMean - m*xMean;
-        fitLine = new Line(m, b);
+        return new Line(m, b);
+    }
+    
+    public double getT(double x, double y) {
+        return vx*(x-x0) + vy*(y-y0);
+    }
+    
+    public Point getPoint(double t) {
+        return Point.fromRect(x0 + vx*t, y0 + vy*t);
+    }
+}
+
+class Cluster {
+    public Color color;
+    public List<Point> points = new LinkedList<>();
+    public Line fitLine;
+    public Point fitLineP1, fitLineP2;
+    public double fitLineLength;
+    
+    public void addPoint(Point p) {
+        points.add(p);
+        p.cluster = this;
+    }
+    
+    public void calcFitLine() {
+        fitLine = Line.getFitLine(points);
         
         double minT = Double.MAX_VALUE, maxT = -Double.MAX_VALUE;
         for (Point p : points) {
@@ -157,6 +163,7 @@ public class Display extends JPanel {
         // Creating Points
         points = generateArray();
         cluster();
+        calcLinearity();
     }
     
     public float curHue = 0;
@@ -202,6 +209,53 @@ public class Display extends JPanel {
         System.out.println("Done ("+((endTime-startTime)/1000000)+" ms)");
     }
     
+    public static final double EPS_2 = 500;
+    public static final int MIN_POINTS_2 = 4;
+    public void calcLinearity() {
+        System.out.println("Calculating linearity stuff...");
+        
+        // calculate distance matrix
+        int n = points.length;
+        double[][] dists = new double[n][n];
+        for (int i1 = 0; i1 < n; i1++) {
+            Point p1 = points[i1];
+            for (int i2 = i1+1; i2 < n; i2++) {
+                Point p2 = points[i2];
+                double dx = p1.x-p2.x, dy=p1.y-p2.y;
+                dists[i1][i2] = dists[i2][i1] = dx*dx + dy*dy;
+            }
+        }
+        
+        for (int i = 0; i < n; i++) {
+            final int fi = i;
+            Point p = points[i];
+            List<Integer> list = new ArrayList<>();
+            List<Integer> list2 = new ArrayList<>();
+            for (int i2 = 0; i2 < n; i2++) {
+                if (i2 == i) continue;
+                if (dists[i][i2] < EPS_2*EPS_2) list.add(i2);
+                list2.add(i2);
+            }
+            if (list.size() < MIN_POINTS_2) {
+                Collections.sort(list2, (Integer ia, Integer ib) -> {
+                    return (int)Math.signum(dists[fi][ia] - dists[fi][ib]);
+                });
+                list = list2.subList(0, MIN_POINTS_2);
+            }
+            List<Point> pointList = new ArrayList<>();
+            for (int i2 : list) {
+                pointList.add(points[i2]);
+            }
+            
+            Line line = Line.getFitLine(pointList);
+            double angle = Math.atan(line.m);
+            p.mCos = Math.cos(angle);
+            p.mSin = Math.sin(angle);
+        }
+        
+        System.out.println("Done");
+    }
+    
     private double scale;
     private int centerX, centerY;
     public int[] getDrawLoc(Point p) {
@@ -231,23 +285,35 @@ public class Display extends JPanel {
             yPts[i] = pos[1];
         }
         g.setColor(Color.GRAY);
-        g.drawPolygon(xPts, yPts, points.length);
+        // g.drawPolygon(xPts, yPts, points.length);
         for (int i = 0; i < points.length; i++) {
-            Cluster c = points[i].cluster;
+            Point p = points[i];
+            int x = xPts[i], y = yPts[i];
+            
+            Cluster c = p.cluster;
             g.setColor(c.color);
-            g.fillRect(xPts[i] - radius, yPts[i] - radius, radius * 2, radius * 2);
+            g.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+        }
+        for (int i = 0; i < points.length; i++) {
+            Point p = points[i];
+            int x = xPts[i], y = yPts[i];
+            
+            int dx = (int)(5*p.mCos), dy = (int)(5*p.mSin);
+            g.setColor(Color.WHITE);
+            g.drawLine(x+dx, y+dy, x-dx, y-dy);
         }
         
-        for (Cluster c : clusters) {
-            int[] p1 = getDrawLoc(c.fitLineP1);
-            int[] p2 = getDrawLoc(c.fitLineP2);
-            g.setColor(Color.WHITE);
-            g.drawLine(p1[0], p1[1], p2[0], p2[1]);
-        }
+        // for (Cluster c : clusters) {
+        //     int[] p1 = getDrawLoc(c.fitLineP1);
+        //     int[] p2 = getDrawLoc(c.fitLineP2);
+        //     g.setColor(Color.WHITE);
+        //     g.drawLine(p1[0], p1[1], p2[0], p2[1]);
+        // }
         
         g.setColor(Color.WHITE);
         g.drawOval(centerX-4, centerY-4, 8, 8);
         g.drawLine(20, 20, 20+(int)(EPS*scale), 20);
+        g.drawLine(20, 40, 20+(int)(EPS_2*scale), 40);
     }
     
     public Point[] generateArray() {
@@ -256,7 +322,7 @@ public class Display extends JPanel {
         
         double maxX = 0, maxY = 0;
         try {
-            BufferedReader br = new BufferedReader(new FileReader(new File("points_proc.txt")));
+            BufferedReader br = new BufferedReader(new FileReader(new File("data_cube_proc.txt")));
             
             String str;
             while ((str = br.readLine()) != null) {
@@ -271,13 +337,13 @@ public class Display extends JPanel {
                 double y = Math.abs(p.y);
                 if (y > maxY) maxY = y;
                 
-                // if (points.size() > 4000) break;
+                if (points.size() > 4000) break;
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
-        widthMilli = (int)(maxX*2.1);
-        heightMilli = (int)(maxY*2.1);
+        widthMilli = (int)(maxX*2.1)/2;
+        heightMilli = (int)(maxY*2.1)/2;
         
         Collections.sort(points);
         System.out.println("Read "+points.size()+" points");
