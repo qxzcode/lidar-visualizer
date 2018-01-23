@@ -163,13 +163,13 @@ public class Display extends JPanel {
         // Creating Points
         points = generateArray();
         cluster();
-        calcLinearity();
+        // calcLinearity();
     }
     
     public float curHue = 0;
     public Color nextColor() {
         curHue += 0.4;
-        return Color.getHSBColor(curHue, 1, 0.5f);
+        return Color.getHSBColor(curHue, 1, 1.0f);
     }
     
     public static final double EPS = 180;
@@ -294,14 +294,14 @@ public class Display extends JPanel {
             g.setColor(c.color);
             g.fillRect(x - radius, y - radius, radius * 2, radius * 2);
         }
-        for (int i = 0; i < points.length; i++) {
-            Point p = points[i];
-            int x = xPts[i], y = yPts[i];
+        // for (int i = 0; i < points.length; i++) {
+        //     Point p = points[i];
+        //     int x = xPts[i], y = yPts[i];
             
-            int dx = (int)(5*p.mCos), dy = (int)(5*p.mSin);
-            g.setColor(Color.WHITE);
-            g.drawLine(x+dx, y+dy, x-dx, y-dy);
-        }
+        //     int dx = (int)(5*p.mCos), dy = (int)(5*p.mSin);
+        //     g.setColor(Color.WHITE);
+        //     g.drawLine(x+dx, y+dy, x-dx, y-dy);
+        // }
         
         // for (Cluster c : clusters) {
         //     int[] p1 = getDrawLoc(c.fitLineP1);
