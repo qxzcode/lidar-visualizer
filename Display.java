@@ -16,6 +16,11 @@ class Point implements Comparable<Point> {
     public Cluster cluster;
     
     public double mCos, mSin;
+    
+    public boolean culled = false;
+    public int revNum;
+    
+    public double err;
 
     private Point(double x, double y) {
         this.x = x;
@@ -51,19 +56,16 @@ class Point implements Comparable<Point> {
 }
 
 class Line {
-    public double m, b;
-    public double x0, y0, vx, vy;
+    public double vx, vy, r; // vy*x - vx*y = r
+    public double x0, y0;
     
-    public Line(double m, double b) {
-        this.m = m;
-        this.b = b;
-        x0 = 0;
-        y0 = b;
-        vx = 1;
-        vy = m;
-        double mag = Math.hypot(vx, vy);
-        vx /= mag;
-        vy /= mag;
+    public Line(double vx, double vy, double r) {
+        this.vx = vx;
+        this.vy = vy;
+        this.r = r;
+        
+        x0 = vy*r;
+        y0 = -vx*r;
     }
     
     public static Line getFitLine(Collection<Point> points) {
@@ -90,9 +92,52 @@ class Line {
         syy /= n-1;
         
         double dsxy = syy - sxx;
-        double m = (dsxy + Math.sqrt(dsxy*dsxy + 4*sxy*sxy)) / (2*sxy);
-        double b = yMean - m*xMean;
-        return new Line(m, b);
+        double vy = dsxy + Math.sqrt(dsxy*dsxy + 4*sxy*sxy);
+        double vx = 2*sxy;
+        double mag = Math.hypot(vx, vy);
+        vx /= mag;
+        vy /= mag;
+        double r = vy*xMean - vx*yMean;
+        return new Line(vx, vy, r);
+    }
+    
+    public double getError(Point p) {
+        return Math.abs(vy*p.x - vx*p.y - r);
+    }
+    
+    public double getAvgError(Collection<Point> points) {
+        // sum up the distances to the line
+        double sumErr = 0;
+        for (Point p : points) {
+            sumErr += getError(p);
+        }
+        return sumErr / points.size();
+    }
+    
+    public void removeWorst(List<Point> list, double percentile) {
+        removeWorst(list, (int)(list.size()*percentile));
+    }
+    
+    public void removeWorst(List<Point> list, int numToRm) {
+        for (Point p : list) p.err = getError(p);
+        Collections.sort(list, (a, b) -> {
+            if (b.err < a.err) return -1;
+            if (b.err > a.err) return +1;
+            return 0;
+        });
+        list.subList(0, numToRm).clear();
+    }
+    
+    public Point drawP1, drawP2;
+    public void calcDrawPoints(Collection<Point> points) {
+        double minT = Double.MAX_VALUE, maxT = -Double.MAX_VALUE;
+        for (Point p : points) {
+            double t = getT(p.x, p.y);
+            if (t < minT) minT = t;
+            if (t > maxT) maxT = t;
+        }
+        drawP1 = getPoint(minT);
+        drawP2 = getPoint(maxT);
     }
     
     public double getT(double x, double y) {
@@ -110,6 +155,7 @@ class Cluster {
     public Line fitLine;
     public Point fitLineP1, fitLineP2;
     public double fitLineLength;
+    public boolean valid;
     
     public void addPoint(Point p) {
         points.add(p);
@@ -117,7 +163,7 @@ class Cluster {
     }
     
     public void calcFitLine() {
-        fitLine = Line.getFitLine(points);
+        fitLine = Display.getCoolLine(points, points.size()/2);
         
         double minT = Double.MAX_VALUE, maxT = -Double.MAX_VALUE;
         for (Point p : points) {
@@ -125,9 +171,17 @@ class Cluster {
             if (t < minT) minT = t;
             if (t > maxT) maxT = t;
         }
-        fitLineLength = maxT - minT;
+        fitLineLength = maxT - minT; //minT=-999999; maxT=999999;
         fitLineP1 = fitLine.getPoint(minT);
         fitLineP2 = fitLine.getPoint(maxT);
+    }
+    
+    double score = -1;
+    public double getScore() {
+        if (score < 0)
+            score = fitLine.getAvgError(points) / fitLineLength;
+        return score;
+        // return points.size() / Math.pow(fitLineLength, 0.3);
     }
 }
 
@@ -144,6 +198,7 @@ public class Display extends JPanel {
     private Point[] points;
     private List<Cluster> clusters;
     
+    public static final double FPS = 10;
     public Display() {
         //setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         
@@ -162,20 +217,69 @@ public class Display extends JPanel {
         
         // Creating Points
         points = generateArray();
+        calcBounds();
         cluster();
+        scanLineFind();
         // calcLinearity();
+        new javax.swing.Timer((int)(1000/FPS), evt -> {
+            drawRev++;
+            if (drawRev >= numRevs) drawRev = 0;
+            repaint();
+        }).start();
+        
+        MouseAdapter mouseListener = new MouseAdapter() {
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                onMouse(e.getX(), e.getY());
+            }
+        };
+        addMouseListener(mouseListener);
+        addMouseMotionListener(mouseListener);
     }
     
+    int lastI = -1;
+    public void onMouse(int mx, int my) {
+        Point m = getDataLoc(mx, my);
+        
+        double minDist = Double.MAX_VALUE;
+        int minI = -1;
+        for (int i = 0; i < points.length; i++) {
+            Point p = points[i];
+            double dx = p.x-m.x, dy = p.y-m.y;
+            double dist = dx*dx + dy*dy;
+            if (dist < minDist) {
+                minDist = dist;
+                minI = i;
+            }
+        }
+        
+        if (lastI != minI) {
+            lastI = minI;
+            debug("index: "+minI);
+        }
+    }
+    
+    public void debug(Object msg) {
+        System.out.println(msg);
+    }
+    
+    public static final float POINT_ALPHA = 0.2f;
     public float curHue = 0;
     public Color nextColor() {
         curHue += 0.4;
-        return Color.getHSBColor(curHue, 1, 1.0f);
+        return setAlpha(Color.getHSBColor(curHue, 1, 1.0f), POINT_ALPHA);
     }
     
-    public static final double EPS = 180;
-    public static final int MIN_POINTS = 10;
+    public static Color setAlpha(Color col, float alpha) {
+        float[] rgb = col.getRGBColorComponents(null);
+        return new Color(rgb[0],rgb[1],rgb[2], alpha);
+    }
+    
+    public static final double EPS = 400;
+    public static final int MIN_POINTS = 5;
+    public double maxScore = 0;
     public void cluster() {
-        System.out.println("Clustering...");
+        debug("Clustering...");
         long startTime = System.nanoTime();
         
         clusters = new ArrayList<>();
@@ -192,6 +296,7 @@ public class Display extends JPanel {
                 Iterator<Point> it = freePoints.iterator();
                 while (it.hasNext()) {
                     Point p = it.next();
+                    if (p.revNum != cur.revNum) continue;
                     double dx = p.x-cur.x, dy = p.y-cur.y;
                     if (dx*dx + dy*dy <= EPS*EPS) {
                         // the point is close enough
@@ -200,13 +305,23 @@ public class Display extends JPanel {
                     }
                 }
             }
-            cluster.color = cluster.points.size() >= MIN_POINTS? nextColor() : Color.WHITE;
-            cluster.calcFitLine();
+            cluster.valid = cluster.points.size() >= MIN_POINTS;
+            cluster.color = cluster.valid? nextColor() : new Color(1f,1f,1f,POINT_ALPHA);
+            if (cluster.valid) cluster.calcFitLine();
             clusters.add(cluster);
+            
+            if (cluster.valid && cluster.getScore() > maxScore)
+                maxScore = cluster.getScore();
         }
         
+        // for (Cluster c : clusters) {
+        //     if (!c.valid) continue;
+        //     float alpha = 1 - (float)Math.pow(c.getScore()/maxScore, 0.5);
+        //     c.color = new Color(alpha,alpha,alpha);
+        // }
+        
         long endTime = System.nanoTime();
-        System.out.println("Done ("+((endTime-startTime)/1000000)+" ms)");
+        debug("Done ("+((endTime-startTime)/1000000)+" ms)");
     }
     
     public static final double EPS_2 = 500;
@@ -248,12 +363,71 @@ public class Display extends JPanel {
             }
             
             Line line = Line.getFitLine(pointList);
-            double angle = Math.atan(line.m);
+            double angle = Math.atan2(line.vy, line.vx);
             p.mCos = Math.cos(angle);
             p.mSin = Math.sin(angle);
         }
         
         System.out.println("Done");
+    }
+    
+    public static Line getCoolLine(List<Point> pointSet, int numToRm) {
+        Line resLine = null;
+        List<Point> curList = pointSet;
+        for (int n = 0; n < numToRm; n++) {
+            // find the point that, when removed, gives the best line
+            double bestErr = Double.MAX_VALUE;
+            Line bestLine = null;
+            List<Point> bestList = null;
+            for (int i = 0; i < curList.size(); i++) {
+                ArrayList<Point> list = new ArrayList<>(curList);
+                list.remove(i);
+                Line line = Line.getFitLine(list);
+                double err = line.getAvgError(list);
+                if (err < bestErr) {
+                    bestErr = err;
+                    bestLine = line;
+                    bestList = list;
+                }
+            }
+            resLine = bestLine;
+            curList = bestList;
+        }
+        return resLine;
+        
+        // Line line = Line.getFitLine(list);
+        // line.removeWorst(list, 0.20);
+        // line = Line.getFitLine(list);
+    }
+    
+    public ArrayList<Line> lines = new ArrayList<>();
+    public void scanLineFind() {
+        try (PrintWriter writer = new PrintWriter("output.csv")) {
+            final int GAP = 10;
+            int n = points.length;
+            for (int i = 0; i < n; i++) {
+                // ArrayList<Point> list = new ArrayList<>();
+                // for (int i2 = i; i2 <= i+GAP; i2++) {
+                //     list.add(points[i2 % points.length]);
+                // }
+                // Line line = getCoolLine(list, 5);
+                // line.calcDrawPoints(list);
+                // lines.add(line);
+                // double angle = Math.atan2(line.vy, line.vx);
+                // if (angle < 0) angle += 2*Math.PI;
+                // if (angle < 3 && i > 80) angle += 2*Math.PI;
+                
+                Point p1 = points[i];
+                Point p2 = points[(i+1) % n];
+                Point p3 = points[(i+2) % n];
+                double dist1 = Math.hypot(p2.x-p1.x, p2.y-p1.y);
+                double dist2 = Math.hypot(p3.x-p1.x, p3.y-p1.y);
+                
+                writer.println(i+", "+Math.min(Math.min(dist1, dist2), 2000));
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
     
     private double scale;
@@ -265,6 +439,13 @@ public class Display extends JPanel {
                           (int)actualY};
     }
     
+    public Point getDataLoc(int x, int y) {
+        return Point.fromRect((x-centerX) / scale,
+                              (y-centerY) / scale);
+    }
+    
+    public int drawRev = 1;
+    public int numRevs;
     public void paint(Graphics g) {
         g.setColor(Color.BLACK);
         g.fillRect(0, 0, getWidth(), getHeight());
@@ -279,75 +460,115 @@ public class Display extends JPanel {
         centerY = getHeight()/2;
         int[] xPts = new int[points.length];
         int[] yPts = new int[points.length];
-        for (int i = 0; i < points.length; i++) {
-            int[] pos = getDrawLoc(points[i]);
-            xPts[i] = pos[0];
-            yPts[i] = pos[1];
-        }
-        g.setColor(Color.GRAY);
-        // g.drawPolygon(xPts, yPts, points.length);
+        Color[] colors = new Color[points.length];
+        int numPts = 0;
         for (int i = 0; i < points.length; i++) {
             Point p = points[i];
+            if (p.revNum != drawRev) continue;
+            int[] pos = getDrawLoc(p);
+            xPts[numPts] = pos[0];
+            yPts[numPts] = pos[1];
+            // float meme = (float)i/points.length;
+            // colors[numPts] = setAlpha(Color.getHSBColor(meme, 1, 1), POINT_ALPHA);
+            colors[numPts] = p.culled? Color.GRAY : p.cluster.color;
+            numPts++;
+        }
+        g.setColor(new Color(255, 255, 255, 50));
+        g.drawPolygon(xPts, yPts, numPts);
+        for (int i = 0; i < numPts; i++) {
             int x = xPts[i], y = yPts[i];
-            
-            Cluster c = p.cluster;
-            g.setColor(c.color);
+            g.setColor(colors[i]);
             g.fillRect(x - radius, y - radius, radius * 2, radius * 2);
         }
-        // for (int i = 0; i < points.length; i++) {
-        //     Point p = points[i];
-        //     int x = xPts[i], y = yPts[i];
-            
-        //     int dx = (int)(5*p.mCos), dy = (int)(5*p.mSin);
-        //     g.setColor(Color.WHITE);
-        //     g.drawLine(x+dx, y+dy, x-dx, y-dy);
-        // }
         
-        // for (Cluster c : clusters) {
-        //     int[] p1 = getDrawLoc(c.fitLineP1);
-        //     int[] p2 = getDrawLoc(c.fitLineP2);
-        //     g.setColor(Color.WHITE);
-        //     g.drawLine(p1[0], p1[1], p2[0], p2[1]);
-        // }
+        /// draw random lines
+        g.setColor(setAlpha(Color.ORANGE, 0.3f));
+        for (Line l : lines) {
+            int[] p1 = getDrawLoc(l.drawP1);
+            int[] p2 = getDrawLoc(l.drawP2);
+            g.drawLine(p1[0], p1[1], p2[0], p2[1]);
+        }
+        
+        /// draw cluster best-fit lines
+        for (Cluster c : clusters) {
+            if (!c.valid || c.points.get(0).revNum!=drawRev) continue;
+            int[] p1 = getDrawLoc(c.fitLineP1);
+            int[] p2 = getDrawLoc(c.fitLineP2);
+            // double alpha = Math.pow(c.getScore()/maxScore, 0.5);
+            // g.setColor(new Color(0f,1f,0f, (float)alpha));
+            g.setColor(Color.GREEN);
+            g.drawLine(p1[0], p1[1], p2[0], p2[1]);
+        }
         
         g.setColor(Color.WHITE);
         g.drawOval(centerX-4, centerY-4, 8, 8);
         g.drawLine(20, 20, 20+(int)(EPS*scale), 20);
-        g.drawLine(20, 40, 20+(int)(EPS_2*scale), 40);
+        // g.drawLine(20, 40, 20+(int)(EPS_2*scale), 40);
+        // g.drawLine(20, 60, 20+(int)(CULL_GAP*scale), 60);
     }
     
+    public static final int REVS_TO_READ = 999;
     public Point[] generateArray() {
-        System.out.println("Loading data...");
-        LinkedList<Point> points = new LinkedList<Point>();
+        debug("Loading data...");
+        ArrayList<Point> points = new ArrayList<Point>();
         
-        double maxX = 0, maxY = 0;
         try {
             BufferedReader br = new BufferedReader(new FileReader(new File("data_cube_proc.txt")));
             
             String str;
+            double lastTheta = -1;
+            int rev = 0;
             while ((str = br.readLine()) != null) {
                 String[] polar = str.split(" ");
                 double r = Double.parseDouble(polar[1]), theta = Math.toRadians(Double.parseDouble(polar[0]));
-                if (r == 0 || r < 1900) continue;
+                if (r == 0) continue;
+                if (r < 1900) continue;
                 Point p = Point.fromPolar(theta, r);
+                if (p.theta < lastTheta) rev++;
+                if (rev >= REVS_TO_READ) break;
+                lastTheta = p.theta;
+                p.revNum = rev;
                 points.add(p);
                 
-                double x = Math.abs(p.x);
-                if (x > maxX) maxX = x;
-                double y = Math.abs(p.y);
-                if (y > maxY) maxY = y;
-                
-                if (points.size() > 4000) break;
+                // if (points.size() >= 4000) break;
             }
+            numRevs = rev;
         } catch (Exception e) {
             e.printStackTrace();
         }
-        widthMilli = (int)(maxX*2.1)/2;
-        heightMilli = (int)(maxY*2.1)/2;
         
+        debug("Read "+points.size()+" points");
         Collections.sort(points);
-        System.out.println("Read "+points.size()+" points");
+        // cullBadData(points);
+        // debug("Culled down to "+points.size()+" points");
         return points.toArray(new Point[points.size()]);
+    }
+    
+    public static final double CULL_GAP = 500;
+    public void cullBadData(ArrayList<Point> list) {
+        Iterator<Point> it = list.iterator();
+        Point last = it.next();
+        while (it.hasNext()) {
+            Point p = it.next();
+            if (p.theta - last.theta < 0.1 && Math.abs(p.dist - last.dist) > CULL_GAP) {
+                // it.remove();
+                p.culled = true;
+            } else {
+                last = p;
+            }
+        }
+    }
+    
+    public void calcBounds() {
+        double maxX = 0, maxY = 0;
+        for (Point p : points) {
+            double x = Math.abs(p.x);
+            if (x > maxX) maxX = x;
+            double y = Math.abs(p.y);
+            if (y > maxY) maxY = y;
+        }
+        widthMilli = (int)(maxX*2.1 * 0.8);
+        heightMilli = (int)(maxY*2.1 * 0.8);
     }
     
     public static void main(String[] args) {
