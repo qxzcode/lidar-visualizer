@@ -263,7 +263,7 @@ public class Display extends JPanel {
         System.out.println(msg);
     }
     
-    public static final float POINT_ALPHA = 0.2f;
+    public static final float POINT_ALPHA = 0.6f;
     public float curHue = 0;
     public Color nextColor() {
         curHue += 0.4;
@@ -277,6 +277,7 @@ public class Display extends JPanel {
     
     public static final double EPS = 400;
     public static final int MIN_POINTS = 5;
+    public static final boolean REV_CLUSTERS = false;
     public double maxScore = 0;
     public void cluster() {
         debug("Clustering...");
@@ -296,7 +297,7 @@ public class Display extends JPanel {
                 Iterator<Point> it = freePoints.iterator();
                 while (it.hasNext()) {
                     Point p = it.next();
-                    if (p.revNum != cur.revNum) continue;
+                    if (REV_CLUSTERS && p.revNum != cur.revNum) continue;
                     double dx = p.x-cur.x, dy = p.y-cur.y;
                     if (dx*dx + dy*dy <= EPS*EPS) {
                         // the point is close enough
@@ -403,27 +404,33 @@ public class Display extends JPanel {
     public ArrayList<Line> lines = new ArrayList<>();
     public void scanLineFind() {
         try (PrintWriter writer = new PrintWriter("output.csv")) {
-            final int GAP = 10;
+            final int GAP = 1;
             int n = points.length;
             for (int i = 0; i < n; i++) {
-                // ArrayList<Point> list = new ArrayList<>();
-                // for (int i2 = i; i2 <= i+GAP; i2++) {
-                //     list.add(points[i2 % points.length]);
-                // }
-                // Line line = getCoolLine(list, 5);
-                // line.calcDrawPoints(list);
-                // lines.add(line);
+                /*ArrayList<Point> list = new ArrayList<>();
+                for (int i2 = i; i2 <= i+GAP; i2++) {
+                    list.add(points[i2 % points.length]);
+                }
+                Line line = getCoolLine(list, 1);
+                line.calcDrawPoints(list);
+                lines.add(line);//*/
                 // double angle = Math.atan2(line.vy, line.vx);
                 // if (angle < 0) angle += 2*Math.PI;
                 // if (angle < 3 && i > 80) angle += 2*Math.PI;
                 
                 Point p1 = points[i];
-                Point p2 = points[(i+1) % n];
-                Point p3 = points[(i+2) % n];
-                double dist1 = Math.hypot(p2.x-p1.x, p2.y-p1.y);
-                double dist2 = Math.hypot(p3.x-p1.x, p3.y-p1.y);
+                Point p2 = points[(i+GAP) % n];
+                Point p3 = points[(i+GAP*2) % n];
+                double dx1 = p1.x-p2.x, dy1 = p1.y-p2.y;
+                double m1 = Math.hypot(dx1, dy1);
+                dx1 /= m1;
+                dy1 /= m1;
+                double dx2 = p2.x-p3.x, dy2 = p2.y-p3.y;
+                double m2 = Math.hypot(dx2, dy2);
+                dx2 /= m2;
+                dy2 /= m2;
                 
-                writer.println(i+", "+Math.min(Math.min(dist1, dist2), 2000));
+                writer.println(i+", "+Math.min(m1, EPS*2));
             }
         } catch (IOException e) {
             e.printStackTrace();
@@ -444,6 +451,7 @@ public class Display extends JPanel {
                               (y-centerY) / scale);
     }
     
+    public static final boolean DRAW_FRAMES = false;
     public int drawRev = 1;
     public int numRevs;
     public void paint(Graphics g) {
@@ -464,7 +472,7 @@ public class Display extends JPanel {
         int numPts = 0;
         for (int i = 0; i < points.length; i++) {
             Point p = points[i];
-            if (p.revNum != drawRev) continue;
+            if (DRAW_FRAMES && p.revNum != drawRev) continue;
             int[] pos = getDrawLoc(p);
             xPts[numPts] = pos[0];
             yPts[numPts] = pos[1];
@@ -490,15 +498,15 @@ public class Display extends JPanel {
         }
         
         /// draw cluster best-fit lines
-        for (Cluster c : clusters) {
-            if (!c.valid || c.points.get(0).revNum!=drawRev) continue;
-            int[] p1 = getDrawLoc(c.fitLineP1);
-            int[] p2 = getDrawLoc(c.fitLineP2);
-            // double alpha = Math.pow(c.getScore()/maxScore, 0.5);
-            // g.setColor(new Color(0f,1f,0f, (float)alpha));
-            g.setColor(Color.GREEN);
-            g.drawLine(p1[0], p1[1], p2[0], p2[1]);
-        }
+        // for (Cluster c : clusters) {
+        //     if (!c.valid || (REV_CLUSTERS && c.points.get(0).revNum!=drawRev)) continue;
+        //     int[] p1 = getDrawLoc(c.fitLineP1);
+        //     int[] p2 = getDrawLoc(c.fitLineP2);
+        //     // double alpha = Math.pow(c.getScore()/maxScore, 0.5);
+        //     // g.setColor(new Color(0f,1f,0f, (float)alpha));
+        //     g.setColor(Color.GREEN);
+        //     g.drawLine(p1[0], p1[1], p2[0], p2[1]);
+        // }
         
         g.setColor(Color.WHITE);
         g.drawOval(centerX-4, centerY-4, 8, 8);
@@ -507,7 +515,8 @@ public class Display extends JPanel {
         // g.drawLine(20, 60, 20+(int)(CULL_GAP*scale), 60);
     }
     
-    public static final int REVS_TO_READ = 999;
+    public static final int REVS_TO_READ = 4;
+    public static boolean CULL_CLOSE = false;
     public Point[] generateArray() {
         debug("Loading data...");
         ArrayList<Point> points = new ArrayList<Point>();
@@ -522,7 +531,7 @@ public class Display extends JPanel {
                 String[] polar = str.split(" ");
                 double r = Double.parseDouble(polar[1]), theta = Math.toRadians(Double.parseDouble(polar[0]));
                 if (r == 0) continue;
-                if (r < 1900) continue;
+                if (CULL_CLOSE && r < 1900) continue;
                 Point p = Point.fromPolar(theta, r);
                 if (p.theta < lastTheta) rev++;
                 if (rev >= REVS_TO_READ) break;
