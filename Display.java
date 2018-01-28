@@ -163,7 +163,7 @@ class Cluster {
     }
     
     public void calcFitLine() {
-        fitLine = Display.getCoolLine(points, points.size()/2);
+        fitLine = Display.getCoolLine(points, 1);//points.size()/2);
         
         double minT = Double.MAX_VALUE, maxT = -Double.MAX_VALUE;
         for (Point p : points) {
@@ -263,7 +263,7 @@ public class Display extends JPanel {
         System.out.println(msg);
     }
     
-    public static final float POINT_ALPHA = 0.6f;
+    public static final float POINT_ALPHA = 0.2f;
     public float curHue = 0;
     public Color nextColor() {
         curHue += 0.4;
@@ -276,7 +276,7 @@ public class Display extends JPanel {
     }
     
     public static final double EPS = 400;
-    public static final int MIN_POINTS = 5;
+    public static final int MIN_POINTS = 15;
     public static final boolean REV_CLUSTERS = false;
     public double maxScore = 0;
     public void cluster() {
@@ -451,7 +451,8 @@ public class Display extends JPanel {
                               (y-centerY) / scale);
     }
     
-    public static final boolean DRAW_FRAMES = false;
+    public static final boolean DRAW_FRAMES = true;
+    public static final boolean DRAW_FIT_LINES = true;
     public int drawRev = 1;
     public int numRevs;
     public void paint(Graphics g) {
@@ -498,15 +499,19 @@ public class Display extends JPanel {
         }
         
         /// draw cluster best-fit lines
-        // for (Cluster c : clusters) {
-        //     if (!c.valid || (REV_CLUSTERS && c.points.get(0).revNum!=drawRev)) continue;
-        //     int[] p1 = getDrawLoc(c.fitLineP1);
-        //     int[] p2 = getDrawLoc(c.fitLineP2);
-        //     // double alpha = Math.pow(c.getScore()/maxScore, 0.5);
-        //     // g.setColor(new Color(0f,1f,0f, (float)alpha));
-        //     g.setColor(Color.GREEN);
-        //     g.drawLine(p1[0], p1[1], p2[0], p2[1]);
-        // }
+        if (DRAW_FIT_LINES) {
+            for (Cluster c : clusters) {
+                if (!c.valid || (REV_CLUSTERS && c.points.get(0).revNum!=drawRev)) continue;
+                if (c.fitLine.getError(Point.fromRect(0,0)) < 800) continue;
+                if (c.fitLineLength < 700) continue;
+                int[] p1 = getDrawLoc(c.fitLineP1);
+                int[] p2 = getDrawLoc(c.fitLineP2);
+                double alpha = Math.pow(1.0 - c.getScore()/maxScore, 2.5);
+                g.setColor(new Color(1f,1f,1f, (float)alpha));
+                // g.setColor(Color.WHITE);
+                g.drawLine(p1[0], p1[1], p2[0], p2[1]);
+            }
+        }
         
         g.setColor(Color.WHITE);
         g.drawOval(centerX-4, centerY-4, 8, 8);
@@ -515,7 +520,7 @@ public class Display extends JPanel {
         // g.drawLine(20, 60, 20+(int)(CULL_GAP*scale), 60);
     }
     
-    public static final int REVS_TO_READ = 4;
+    public static final int REVS_TO_READ = 10;
     public static boolean CULL_CLOSE = false;
     public Point[] generateArray() {
         debug("Loading data...");
@@ -568,6 +573,7 @@ public class Display extends JPanel {
         }
     }
     
+    public static final double SCALE_FACTOR = 1.4;
     public void calcBounds() {
         double maxX = 0, maxY = 0;
         for (Point p : points) {
@@ -576,8 +582,8 @@ public class Display extends JPanel {
             double y = Math.abs(p.y);
             if (y > maxY) maxY = y;
         }
-        widthMilli = (int)(maxX*2.1 * 0.8);
-        heightMilli = (int)(maxY*2.1 * 0.8);
+        widthMilli = (int)(maxX*2.1 / SCALE_FACTOR);
+        heightMilli = (int)(maxY*2.1 / SCALE_FACTOR);
     }
     
     public static void main(String[] args) {
