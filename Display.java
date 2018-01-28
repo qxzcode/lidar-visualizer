@@ -13,14 +13,8 @@ import java.util.*;
 class Point implements Comparable<Point> {
     public double x, y;
     double theta, dist;
-    public Cluster cluster;
     
-    public double mCos, mSin;
-    
-    public boolean culled = false;
     public int revNum;
-    
-    public double err;
 
     private Point(double x, double y) {
         this.x = x;
@@ -101,31 +95,17 @@ class Line {
         return new Line(vx, vy, r);
     }
     
-    public double getError(Point p) {
+    public double getDistance(Point p) {
         return Math.abs(vy*p.x - vx*p.y - r);
     }
     
-    public double getAvgError(Collection<Point> points) {
+    public double getAvgDistance(Collection<Point> points) {
         // sum up the distances to the line
         double sumErr = 0;
         for (Point p : points) {
-            sumErr += getError(p);
+            sumErr += getDistance(p);
         }
         return sumErr / points.size();
-    }
-    
-    public void removeWorst(List<Point> list, double percentile) {
-        removeWorst(list, (int)(list.size()*percentile));
-    }
-    
-    public void removeWorst(List<Point> list, int numToRm) {
-        for (Point p : list) p.err = getError(p);
-        Collections.sort(list, (a, b) -> {
-            if (b.err < a.err) return -1;
-            if (b.err > a.err) return +1;
-            return 0;
-        });
-        list.subList(0, numToRm).clear();
     }
     
     public Point drawP1, drawP2;
@@ -149,54 +129,17 @@ class Line {
     }
 }
 
-class Cluster {
-    public Color color;
-    public List<Point> points = new LinkedList<>();
-    public Line fitLine;
-    public Point fitLineP1, fitLineP2;
-    public double fitLineLength;
-    public boolean valid;
-    
-    public void addPoint(Point p) {
-        points.add(p);
-        p.cluster = this;
-    }
-    
-    public void calcFitLine() {
-        fitLine = Display.getCoolLine(points, 1);//points.size()/2);
-        
-        double minT = Double.MAX_VALUE, maxT = -Double.MAX_VALUE;
-        for (Point p : points) {
-            double t = fitLine.getT(p.x, p.y);
-            if (t < minT) minT = t;
-            if (t > maxT) maxT = t;
-        }
-        fitLineLength = maxT - minT; //minT=-999999; maxT=999999;
-        fitLineP1 = fitLine.getPoint(minT);
-        fitLineP2 = fitLine.getPoint(maxT);
-    }
-    
-    double score = -1;
-    public double getScore() {
-        if (score < 0)
-            score = fitLine.getAvgError(points) / fitLineLength;
-        return score;
-        // return points.size() / Math.pow(fitLineLength, 0.3);
-    }
-}
-
 public class Display extends JPanel {
-    private final int width         = 1500;
-    private final int height        = 1500;
-    private       int widthMilli    = 10000;
-    private       int heightMilli   = 10000;
+    private final int width         = 15000;
+    private final int height        = 15000;
+    private       int widthMilli;
+    private       int heightMilli;
     private final int radius        = 2;
     private final Font font         = new Font("Roboto", Font.BOLD, 48);
     
     private JLabel display;
     
     private Point[] points;
-    private List<Cluster> clusters;
     
     public static final double FPS = 10;
     public Display() {
@@ -213,14 +156,13 @@ public class Display extends JPanel {
         display.setHorizontalTextPosition(JLabel.LEFT);
         add(display);
         
+        setFocusable(true);
+        requestFocus();
         setVisible(true); 
         
         // Creating Points
         points = generateArray();
         calcBounds();
-        cluster();
-        scanLineFind();
-        // calcLinearity();
         new javax.swing.Timer((int)(1000/FPS), evt -> {
             drawRev++;
             if (drawRev >= numRevs) drawRev = 0;
@@ -230,15 +172,38 @@ public class Display extends JPanel {
         MouseAdapter mouseListener = new MouseAdapter() {
             @Override
             public void mouseMoved(MouseEvent e) {
-                onMouse(e.getX(), e.getY());
+                event(e.getX(), e.getY(), false);
+            }
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                event(e.getX(), e.getY(), SwingUtilities.isLeftMouseButton(e));
+            }
+            private int lastX=0, lastY=0;
+            private void event(int x, int y, boolean drag) {
+                int dx = x-lastX, dy = y-lastY;
+                lastX = x;
+                lastY = y;
+                onMouse(x, y, dx, dy, drag);
             }
         };
         addMouseListener(mouseListener);
         addMouseMotionListener(mouseListener);
+        
+        addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                onKey(e.getKeyCode());
+            }
+        });
     }
     
     int lastI = -1;
-    public void onMouse(int mx, int my) {
+    public void onMouse(int mx, int my, int mdx, int mdy, boolean drag) {
+        if (drag) {
+            camX -= mdx / scale;
+            camY -= mdy / scale;
+        }
+        
         Point m = getDataLoc(mx, my);
         
         double minDist = Double.MAX_VALUE;
@@ -255,19 +220,22 @@ public class Display extends JPanel {
         
         if (lastI != minI) {
             lastI = minI;
-            debug("index: "+minI);
+            // debug("index: "+minI);
         }
+    }
+    
+    public static final double ZOOM_RATE = 1.4;
+    public void onKey(int code) {
+        if (code == KeyEvent.VK_MINUS)
+            scaleFactor /= ZOOM_RATE;
+        if (code == KeyEvent.VK_EQUALS || code == KeyEvent.VK_PLUS)
+            scaleFactor *= ZOOM_RATE;
+        calcBounds();
+        repaint();
     }
     
     public void debug(Object msg) {
         System.out.println(msg);
-    }
-    
-    public static final float POINT_ALPHA = 0.2f;
-    public float curHue = 0;
-    public Color nextColor() {
-        curHue += 0.4;
-        return setAlpha(Color.getHSBColor(curHue, 1, 1.0f), POINT_ALPHA);
     }
     
     public static Color setAlpha(Color col, float alpha) {
@@ -275,184 +243,22 @@ public class Display extends JPanel {
         return new Color(rgb[0],rgb[1],rgb[2], alpha);
     }
     
-    public static final double EPS = 400;
-    public static final int MIN_POINTS = 15;
-    public static final boolean REV_CLUSTERS = false;
-    public double maxScore = 0;
-    public void cluster() {
-        debug("Clustering...");
-        long startTime = System.nanoTime();
-        
-        clusters = new ArrayList<>();
-        LinkedList<Point> freePoints = new LinkedList<>(Arrays.asList(points));
-        while (!freePoints.isEmpty()) {
-            // find a cluster
-            LinkedList<Point> openPoints = new LinkedList<>();
-            openPoints.add(freePoints.pop());
-            Cluster cluster = new Cluster();
-            while (!openPoints.isEmpty()) {
-                // find all the neighbors of this point
-                Point cur = openPoints.pop();
-                cluster.addPoint(cur);
-                Iterator<Point> it = freePoints.iterator();
-                while (it.hasNext()) {
-                    Point p = it.next();
-                    if (REV_CLUSTERS && p.revNum != cur.revNum) continue;
-                    double dx = p.x-cur.x, dy = p.y-cur.y;
-                    if (dx*dx + dy*dy <= EPS*EPS) {
-                        // the point is close enough
-                        openPoints.add(p);
-                        it.remove();
-                    }
-                }
-            }
-            cluster.valid = cluster.points.size() >= MIN_POINTS;
-            cluster.color = cluster.valid? nextColor() : new Color(1f,1f,1f,POINT_ALPHA);
-            if (cluster.valid) cluster.calcFitLine();
-            clusters.add(cluster);
-            
-            if (cluster.valid && cluster.getScore() > maxScore)
-                maxScore = cluster.getScore();
-        }
-        
-        // for (Cluster c : clusters) {
-        //     if (!c.valid) continue;
-        //     float alpha = 1 - (float)Math.pow(c.getScore()/maxScore, 0.5);
-        //     c.color = new Color(alpha,alpha,alpha);
-        // }
-        
-        long endTime = System.nanoTime();
-        debug("Done ("+((endTime-startTime)/1000000)+" ms)");
-    }
-    
-    public static final double EPS_2 = 500;
-    public static final int MIN_POINTS_2 = 4;
-    public void calcLinearity() {
-        System.out.println("Calculating linearity stuff...");
-        
-        // calculate distance matrix
-        int n = points.length;
-        double[][] dists = new double[n][n];
-        for (int i1 = 0; i1 < n; i1++) {
-            Point p1 = points[i1];
-            for (int i2 = i1+1; i2 < n; i2++) {
-                Point p2 = points[i2];
-                double dx = p1.x-p2.x, dy=p1.y-p2.y;
-                dists[i1][i2] = dists[i2][i1] = dx*dx + dy*dy;
-            }
-        }
-        
-        for (int i = 0; i < n; i++) {
-            final int fi = i;
-            Point p = points[i];
-            List<Integer> list = new ArrayList<>();
-            List<Integer> list2 = new ArrayList<>();
-            for (int i2 = 0; i2 < n; i2++) {
-                if (i2 == i) continue;
-                if (dists[i][i2] < EPS_2*EPS_2) list.add(i2);
-                list2.add(i2);
-            }
-            if (list.size() < MIN_POINTS_2) {
-                Collections.sort(list2, (Integer ia, Integer ib) -> {
-                    return (int)Math.signum(dists[fi][ia] - dists[fi][ib]);
-                });
-                list = list2.subList(0, MIN_POINTS_2);
-            }
-            List<Point> pointList = new ArrayList<>();
-            for (int i2 : list) {
-                pointList.add(points[i2]);
-            }
-            
-            Line line = Line.getFitLine(pointList);
-            double angle = Math.atan2(line.vy, line.vx);
-            p.mCos = Math.cos(angle);
-            p.mSin = Math.sin(angle);
-        }
-        
-        System.out.println("Done");
-    }
-    
-    public static Line getCoolLine(List<Point> pointSet, int numToRm) {
-        Line resLine = null;
-        List<Point> curList = pointSet;
-        for (int n = 0; n < numToRm; n++) {
-            // find the point that, when removed, gives the best line
-            double bestErr = Double.MAX_VALUE;
-            Line bestLine = null;
-            List<Point> bestList = null;
-            for (int i = 0; i < curList.size(); i++) {
-                ArrayList<Point> list = new ArrayList<>(curList);
-                list.remove(i);
-                Line line = Line.getFitLine(list);
-                double err = line.getAvgError(list);
-                if (err < bestErr) {
-                    bestErr = err;
-                    bestLine = line;
-                    bestList = list;
-                }
-            }
-            resLine = bestLine;
-            curList = bestList;
-        }
-        return resLine;
-        
-        // Line line = Line.getFitLine(list);
-        // line.removeWorst(list, 0.20);
-        // line = Line.getFitLine(list);
-    }
-    
-    public ArrayList<Line> lines = new ArrayList<>();
-    public void scanLineFind() {
-        try (PrintWriter writer = new PrintWriter("output.csv")) {
-            final int GAP = 1;
-            int n = points.length;
-            for (int i = 0; i < n; i++) {
-                /*ArrayList<Point> list = new ArrayList<>();
-                for (int i2 = i; i2 <= i+GAP; i2++) {
-                    list.add(points[i2 % points.length]);
-                }
-                Line line = getCoolLine(list, 1);
-                line.calcDrawPoints(list);
-                lines.add(line);//*/
-                // double angle = Math.atan2(line.vy, line.vx);
-                // if (angle < 0) angle += 2*Math.PI;
-                // if (angle < 3 && i > 80) angle += 2*Math.PI;
-                
-                Point p1 = points[i];
-                Point p2 = points[(i+GAP) % n];
-                Point p3 = points[(i+GAP*2) % n];
-                double dx1 = p1.x-p2.x, dy1 = p1.y-p2.y;
-                double m1 = Math.hypot(dx1, dy1);
-                dx1 /= m1;
-                dy1 /= m1;
-                double dx2 = p2.x-p3.x, dy2 = p2.y-p3.y;
-                double m2 = Math.hypot(dx2, dy2);
-                dx2 /= m2;
-                dy2 /= m2;
-                
-                writer.println(i+", "+Math.min(m1, EPS*2));
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-    
     private double scale;
     private int centerX, centerY;
     public int[] getDrawLoc(Point p) {
-        double actualX = p.getX() * scale + centerX;
-        double actualY = p.getY() * scale + centerY;
+        double actualX = (p.x-camX) * scale + centerX;
+        double actualY = (p.y-camY) * scale + centerY;
         return new int[] {(int)actualX,
                           (int)actualY};
     }
     
     public Point getDataLoc(int x, int y) {
-        return Point.fromRect((x-centerX) / scale,
-                              (y-centerY) / scale);
+        return Point.fromRect((x-centerX) / scale + camX,
+                              (y-centerY) / scale + camY);
     }
     
+    public static final float POINT_ALPHA = 0.9f;
     public static final boolean DRAW_FRAMES = true;
-    public static final boolean DRAW_FIT_LINES = true;
     public int drawRev = 1;
     public int numRevs;
     public void paint(Graphics g) {
@@ -469,7 +275,6 @@ public class Display extends JPanel {
         centerY = getHeight()/2;
         int[] xPts = new int[points.length];
         int[] yPts = new int[points.length];
-        Color[] colors = new Color[points.length];
         int numPts = 0;
         for (int i = 0; i < points.length; i++) {
             Point p = points[i];
@@ -477,50 +282,22 @@ public class Display extends JPanel {
             int[] pos = getDrawLoc(p);
             xPts[numPts] = pos[0];
             yPts[numPts] = pos[1];
-            // float meme = (float)i/points.length;
-            // colors[numPts] = setAlpha(Color.getHSBColor(meme, 1, 1), POINT_ALPHA);
-            colors[numPts] = p.culled? Color.GRAY : p.cluster.color;
             numPts++;
         }
-        g.setColor(new Color(255, 255, 255, 50));
+        g.setColor(new Color(1f, 1f, 1f, 0.2f));
         g.drawPolygon(xPts, yPts, numPts);
+        g.setColor(new Color(0f, 1f, 0f, POINT_ALPHA));
         for (int i = 0; i < numPts; i++) {
             int x = xPts[i], y = yPts[i];
-            g.setColor(colors[i]);
             g.fillRect(x - radius, y - radius, radius * 2, radius * 2);
         }
         
-        /// draw random lines
-        g.setColor(setAlpha(Color.ORANGE, 0.3f));
-        for (Line l : lines) {
-            int[] p1 = getDrawLoc(l.drawP1);
-            int[] p2 = getDrawLoc(l.drawP2);
-            g.drawLine(p1[0], p1[1], p2[0], p2[1]);
-        }
-        
-        /// draw cluster best-fit lines
-        if (DRAW_FIT_LINES) {
-            for (Cluster c : clusters) {
-                if (!c.valid || (REV_CLUSTERS && c.points.get(0).revNum!=drawRev)) continue;
-                if (c.fitLine.getError(Point.fromRect(0,0)) < 800) continue;
-                if (c.fitLineLength < 700) continue;
-                int[] p1 = getDrawLoc(c.fitLineP1);
-                int[] p2 = getDrawLoc(c.fitLineP2);
-                double alpha = Math.pow(1.0 - c.getScore()/maxScore, 2.5);
-                g.setColor(new Color(1f,1f,1f, (float)alpha));
-                // g.setColor(Color.WHITE);
-                g.drawLine(p1[0], p1[1], p2[0], p2[1]);
-            }
-        }
-        
+        int[] originPos = getDrawLoc(Point.fromRect(0, 0));
         g.setColor(Color.WHITE);
-        g.drawOval(centerX-4, centerY-4, 8, 8);
-        g.drawLine(20, 20, 20+(int)(EPS*scale), 20);
-        // g.drawLine(20, 40, 20+(int)(EPS_2*scale), 40);
-        // g.drawLine(20, 60, 20+(int)(CULL_GAP*scale), 60);
+        g.drawOval(originPos[0]-4, originPos[1]-4, 8, 8);
     }
     
-    public static final int REVS_TO_READ = 10;
+    public static final int REVS_TO_READ = 1000;
     public static boolean CULL_CLOSE = false;
     public Point[] generateArray() {
         debug("Loading data...");
@@ -543,8 +320,6 @@ public class Display extends JPanel {
                 lastTheta = p.theta;
                 p.revNum = rev;
                 points.add(p);
-                
-                // if (points.size() >= 4000) break;
             }
             numRevs = rev;
         } catch (Exception e) {
@@ -553,27 +328,10 @@ public class Display extends JPanel {
         
         debug("Read "+points.size()+" points");
         Collections.sort(points);
-        // cullBadData(points);
-        // debug("Culled down to "+points.size()+" points");
         return points.toArray(new Point[points.size()]);
     }
     
-    public static final double CULL_GAP = 500;
-    public void cullBadData(ArrayList<Point> list) {
-        Iterator<Point> it = list.iterator();
-        Point last = it.next();
-        while (it.hasNext()) {
-            Point p = it.next();
-            if (p.theta - last.theta < 0.1 && Math.abs(p.dist - last.dist) > CULL_GAP) {
-                // it.remove();
-                p.culled = true;
-            } else {
-                last = p;
-            }
-        }
-    }
-    
-    public static final double SCALE_FACTOR = 1.4;
+    public static double scaleFactor = 1.0, camX = 0, camY = 0;
     public void calcBounds() {
         double maxX = 0, maxY = 0;
         for (Point p : points) {
@@ -582,8 +340,8 @@ public class Display extends JPanel {
             double y = Math.abs(p.y);
             if (y > maxY) maxY = y;
         }
-        widthMilli = (int)(maxX*2.1 / SCALE_FACTOR);
-        heightMilli = (int)(maxY*2.1 / SCALE_FACTOR);
+        widthMilli = (int)(maxX*2.1 / scaleFactor);
+        heightMilli = (int)(maxY*2.1 / scaleFactor);
     }
     
     public static void main(String[] args) {
@@ -596,6 +354,7 @@ public class Display extends JPanel {
         frame.setResizable(true);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setLocationRelativeTo(null);
+        frame.setExtendedState(frame.getExtendedState() | JFrame.MAXIMIZED_BOTH);
         frame.setVisible(true);
     }
 }
