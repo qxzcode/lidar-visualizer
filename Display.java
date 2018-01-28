@@ -13,8 +13,9 @@ import java.util.*;
 class Point implements Comparable<Point> {
     public final double x, y;
     public final double theta, dist;
-    
     public int revNum;
+    
+    public boolean good = true;
 
     private Point(double x, double y, double theta, double dist) {
         this.x = x;
@@ -65,6 +66,15 @@ class Line {
         
         x0 = vy*r;
         y0 = -vx*r;
+    }
+    
+    public Line(double vx, double vy, double x0, double y0) {
+        this.vx = vx;
+        this.vy = vy;
+        this.x0 = x0;
+        this.y0 = y0;
+        
+        r = vy*x0 - vx*y0;
     }
     
     public static Line getFitLine(Collection<Point> points) {
@@ -149,6 +159,21 @@ class Segment {
         this.pMax = line.getPoint(tMax);
     }
     
+    public double getDistance(Point p) {
+        double t = line.getT(p);
+        if (t <= tMin) return pMin.getDistance(p);
+        if (t >= tMax) return pMax.getDistance(p);
+        return line.getDistance(p);
+    }
+    
+    public double getDistanceSq(Point p) {
+        double t = line.getT(p);
+        if (t <= tMin) return pMin.getDistanceSq(p);
+        if (t >= tMax) return pMax.getDistanceSq(p);
+        double d = line.getDistance(p);
+        return d*d;
+    }
+    
     public Point getClosestPoint(Point p) {
         double t = line.getT(p);
         if (t <= tMin) return pMin;
@@ -191,6 +216,7 @@ public class Display extends JPanel {
         // Creating Points
         points = generateArray();
         calcBounds();
+        debug(doICP(reference, 1));
         new javax.swing.Timer((int)(1000/FPS), evt -> {
             drawRev++;
             if (drawRev >= numRevs) drawRev = 0;
@@ -225,11 +251,12 @@ public class Display extends JPanel {
         });
     }
     
-    int lastI = -1;
+    int selectedI = -1;
     public void onMouse(int mx, int my, int mdx, int mdy, boolean drag) {
         if (drag) {
             camX -= mdx / scale;
             camY -= mdy / scale;
+            repaint();
         }
         
         Point m = getDataLoc(mx, my);
@@ -246,18 +273,21 @@ public class Display extends JPanel {
             }
         }
         
-        if (lastI != minI) {
-            lastI = minI;
+        if (selectedI != minI) {
+            selectedI = minI;
             // debug("index: "+minI);
         }
     }
     
     public static final double ZOOM_RATE = 1.4;
+    int lastNumIters = 1;
     public void onKey(int code) {
         if (code == KeyEvent.VK_MINUS)
             scaleFactor /= ZOOM_RATE;
         if (code == KeyEvent.VK_EQUALS || code == KeyEvent.VK_PLUS)
             scaleFactor *= ZOOM_RATE;
+        if (code == KeyEvent.VK_SPACE)
+            debug(doICP(reference, ++lastNumIters));
         calcBounds();
         repaint();
     }
@@ -271,13 +301,163 @@ public class Display extends JPanel {
         return new Color(rgb[0],rgb[1],rgb[2], alpha);
     }
     
-    //////////////////////////////////////////////////////////////
+    //////////////////////////// ICP ////////////////////////////
     
-    public void doICP() {
-        
+    class PointPair {
+        public Point a, b;
+        public PointPair(Point a, Point b) {
+            this.a = a;
+            this.b = b;
+        }
     }
     
-    //////////////////////////////////////////////////////////////
+    class Transform {
+        // rotate by theta about the origin, then translate by <tx, ty>
+        public double theta, tx, ty;
+        public Transform() {
+            theta = 0;
+            tx = ty = 0;
+        }
+        public Transform(double theta, double tx, double ty) {
+            this.theta = theta;
+            this.tx = tx;
+            this.ty = ty;
+        }
+        public Point apply(Point p) {
+            double sin = Math.sin(theta), cos = Math.cos(theta);
+            return Point.fromRect(p.x*cos - p.y*sin + tx,
+                                  p.x*sin + p.y*cos + ty);
+        }
+        public Line apply(Line l) {
+            double sin = Math.sin(theta), cos = Math.cos(theta);
+            return new Line(l.vx*cos - l.vy*sin,
+                            l.vx*sin + l.vy*cos,
+                            l.x0*cos - l.y0*sin + tx,
+                            l.x0*sin + l.y0*cos + ty);
+        }
+        public Segment apply(Segment s) {
+            return new Segment(apply(s.line), s.tMin, s.tMax);
+        }
+        public ReferenceModel apply(ReferenceModel rm) {
+            Segment[] ss = new Segment[rm.segments.length];
+            for (int i = 0; i < rm.segments.length; i++) {
+                ss[i] = apply(rm.segments[i]);
+            }
+            return new ReferenceModel(ss);
+        }
+        public Transform inverse() {
+            double sin = Math.sin(theta), cos = Math.cos(theta);
+            return new Transform(-theta,
+                                 -tx*cos - ty*sin,
+                                  tx*sin - ty*cos);
+        }
+        public String toString() {
+            return "["+Math.toDegrees(theta)+"° <"+tx+", "+ty+">]";
+        }
+    }
+    
+    class ReferenceModel {
+        public Segment[] segments;
+        public ReferenceModel(Segment[] ss) {
+            segments = ss;
+        }
+        public Point getClosestPoint(Point p) {
+            double minDist = Double.MAX_VALUE;
+            Segment minSeg = null;
+            for (Segment s : segments) {
+                double dist = s.getDistanceSq(p);
+                if (dist < minDist) {
+                    minDist = dist;
+                    minSeg = s;
+                }
+            }
+            return minSeg.getClosestPoint(p);
+        }
+        public void draw(Graphics g) {
+            g.setColor(Color.ORANGE);
+            for (Segment s : segments) {
+                drawLine(g, s.pMin, s.pMax);
+            }
+        }
+    }
+    
+    public static final double REFM_SIZE = 4000;
+    ReferenceModel reference = new ReferenceModel(new Segment[] {
+        new Segment(new Line(0, +1, REFM_SIZE), -REFM_SIZE, REFM_SIZE),
+        new Segment(new Line(0, -1, REFM_SIZE), -REFM_SIZE, REFM_SIZE),
+        new Segment(new Line(+1, 0, REFM_SIZE), -REFM_SIZE, REFM_SIZE),
+        new Segment(new Line(-1, 0, REFM_SIZE), -REFM_SIZE, REFM_SIZE)
+    });
+    ReferenceModel transReference;
+    Transform icpTrans;
+    
+    public static final double OUTLIER_THRESH = 1000;
+    ArrayList<PointPair> pairs;
+    public Transform doICP(ReferenceModel reference, int iterations) {
+        debug("Doing ICP registration...");
+        long startTime = System.nanoTime();
+        Transform trans = new Transform();
+        for (int n = 0; n < iterations; n++) {
+            /// get pairs of corresponding points
+            Transform transInv = trans.inverse();
+            pairs = new ArrayList<>();
+            for (Point p : points) {
+                Point p2 = transInv.apply(p);
+                Point rp = reference.getClosestPoint(p2);
+                p.good = p2.getDistanceSq(rp) < OUTLIER_THRESH*OUTLIER_THRESH;
+                if (!p.good) continue;
+                pairs.add(new PointPair(p, rp));
+            }
+            
+            /// calculate the new transform
+            // code based on http://mrpt.ual.es/reference/devel/se2__l2_8cpp_source.html#l00158
+            final int N = pairs.size();debug(N);if(N==0)return new Transform();
+            final double N_inv = 1.0 / N;
+            double SumXa = 0, SumXb = 0, SumYa = 0, SumYb = 0;
+            double Sxx = 0, Sxy = 0, Syx = 0, Syy = 0;
+            
+            for (PointPair p : pairs) {
+                // Compute the terms:
+                SumXa += p.a.x;
+                SumYa += p.a.y;
+                
+                SumXb += p.b.x;
+                SumYb += p.b.y;
+                
+                Sxx += p.a.x * p.b.x;
+                Sxy += p.a.x * p.b.y;
+                Syx += p.a.y * p.b.x;
+                Syy += p.a.y * p.b.y;
+            }
+            
+            final double mean_x_a = SumXa * N_inv;
+            final double mean_y_a = SumYa * N_inv;
+            final double mean_x_b = SumXb * N_inv;
+            final double mean_y_b = SumYb * N_inv;
+            
+            // Auxiliary variables Ax,Ay:
+            final double Ax = N * (Sxx + Syy) - SumXa * SumXb - SumYa * SumYb;
+            final double Ay = SumXa * SumYb + N * (Syx - Sxy) - SumXb * SumYa;
+            
+            trans.theta = (Ax == 0 && Ay == 0)? 0.0 : Math.atan2(Ay, Ax);
+            
+            final double ccos = Math.cos(trans.theta);
+            final double csin = Math.sin(trans.theta);
+            
+            trans.tx = mean_x_a - mean_x_b * ccos + mean_y_b * csin;
+            trans.ty = mean_y_a - mean_x_b * csin - mean_y_b * ccos;
+            
+            // trans.tx = mean_x_a - mean_x_b;
+            // trans.ty = mean_y_a - mean_y_b;
+        }
+        long endTime = System.nanoTime();
+        debug("Done ("+((endTime-startTime)/1000000)+" ms)");
+        icpTrans = trans;
+        transReference = trans.apply(reference);
+        return trans;
+    }
+    
+    /////////////////////////////////////////////////////////////
     
     private double scale;
     private int centerX, centerY;
@@ -291,6 +471,12 @@ public class Display extends JPanel {
     public Point getDataLoc(int x, int y) {
         return Point.fromRect((x-centerX) / scale + camX,
                               (y-centerY) / scale + camY);
+    }
+    
+    public void drawLine(Graphics g, Point p1, Point p2) {
+        int[] pos1 = getDrawLoc(p1);
+        int[] pos2 = getDrawLoc(p2);
+        g.drawLine(pos1[0], pos1[1], pos2[0], pos2[1]);
     }
     
     public static final float POINT_ALPHA = 0.9f;
@@ -311,6 +497,7 @@ public class Display extends JPanel {
         centerY = getHeight()/2;
         int[] xPts = new int[points.length];
         int[] yPts = new int[points.length];
+        Color[] colors = new Color[points.length];
         int numPts = 0;
         for (int i = 0; i < points.length; i++) {
             Point p = points[i];
@@ -318,23 +505,38 @@ public class Display extends JPanel {
             int[] pos = getDrawLoc(p);
             xPts[numPts] = pos[0];
             yPts[numPts] = pos[1];
+            colors[numPts] = p.good? new Color(0f, 1f, 0f, POINT_ALPHA) : new Color(1f, 1f, 1f, POINT_ALPHA);
             numPts++;
         }
         g.setColor(new Color(1f, 1f, 1f, 0.2f));
         g.drawPolygon(xPts, yPts, numPts);
-        g.setColor(new Color(0f, 1f, 0f, POINT_ALPHA));
         for (int i = 0; i < numPts; i++) {
             int x = xPts[i], y = yPts[i];
+            g.setColor(colors[i]);
             g.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+        }
+        
+        transReference.draw(g);
+        
+        if (selectedI >= 0) {
+            Point p = points[selectedI];
+            Point rp = transReference.getClosestPoint(p);
+            g.setColor(Color.RED);
+            drawLine(g, p, rp);
+        }
+        
+        for (PointPair pair : pairs) {
+            drawLine(g, pair.a, icpTrans.apply(pair.b));
         }
         
         int[] originPos = getDrawLoc(Point.fromRect(0, 0));
         g.setColor(Color.WHITE);
         g.drawOval(originPos[0]-4, originPos[1]-4, 8, 8);
+        g.drawLine(20, 20, 20+(int)(OUTLIER_THRESH*scale), 20);
     }
     
-    public static final int REVS_TO_READ = 1000;
-    public static boolean CULL_CLOSE = false;
+    public static final int REVS_TO_READ = 1;
+    public static boolean CULL_CLOSE = true;
     public Point[] generateArray() {
         debug("Loading data...");
         ArrayList<Point> points = new ArrayList<Point>();
