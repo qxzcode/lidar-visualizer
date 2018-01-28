@@ -11,28 +11,33 @@ import java.awt.geom.*;
 import java.util.*;
 
 class Point implements Comparable<Point> {
-    public double x, y;
-    double theta, dist;
+    public final double x, y;
+    public final double theta, dist;
     
     public int revNum;
 
-    private Point(double x, double y) {
+    private Point(double x, double y, double theta, double dist) {
         this.x = x;
         this.y = y;
+        this.theta = theta;
+        this.dist = dist;
     }
     
     public static Point fromPolar(double theta, double dist) {
-        Point p = new Point(dist*Math.cos(theta), dist*Math.sin(theta));
-        p.theta = theta;
-        p.dist = dist;
-        return p;
+        return new Point(dist*Math.cos(theta), dist*Math.sin(theta), theta, dist);
     }
     
     public static Point fromRect(double x, double y) {
-        Point p = new Point(x, y);
-        p.theta = Math.atan2(y, x);
-        p.dist = Math.hypot(x, y);
-        return p;
+        return new Point(x, y, Math.atan2(y, x), Math.hypot(x, y));
+    }
+    
+    public double getDistanceSq(Point p) {
+        double dx = x-p.x, dy = y-p.y;
+        return dx*dx + dy*dy;
+    }
+    
+    public double getDistance(Point p) {
+        return Math.sqrt(getDistanceSq(p));
     }
     
     public int compareTo(Point p) {
@@ -108,24 +113,47 @@ class Line {
         return sumErr / points.size();
     }
     
-    public Point drawP1, drawP2;
-    public void calcDrawPoints(Collection<Point> points) {
+    public Segment getSegment(Collection<Point> points) {
         double minT = Double.MAX_VALUE, maxT = -Double.MAX_VALUE;
         for (Point p : points) {
             double t = getT(p.x, p.y);
             if (t < minT) minT = t;
             if (t > maxT) maxT = t;
         }
-        drawP1 = getPoint(minT);
-        drawP2 = getPoint(maxT);
+        return new Segment(this, minT, maxT);
     }
     
     public double getT(double x, double y) {
         return vx*(x-x0) + vy*(y-y0);
     }
     
+    public double getT(Point p) {
+        return getT(p.x, p.y);
+    }
+    
     public Point getPoint(double t) {
         return Point.fromRect(x0 + vx*t, y0 + vy*t);
+    }
+}
+
+class Segment {
+    public Line line;
+    public double tMin, tMax;
+    public Point pMin, pMax;
+    
+    public Segment(Line line, double tMin, double tMax) {
+        this.line = line;
+        this.tMin = tMin;
+        this.tMax = tMax;
+        this.pMin = line.getPoint(tMin);
+        this.pMax = line.getPoint(tMax);
+    }
+    
+    public Point getClosestPoint(Point p) {
+        double t = line.getT(p);
+        if (t <= tMin) return pMin;
+        if (t >= tMax) return pMax;
+        return line.getPoint(t);
     }
 }
 
@@ -242,6 +270,14 @@ public class Display extends JPanel {
         float[] rgb = col.getRGBColorComponents(null);
         return new Color(rgb[0],rgb[1],rgb[2], alpha);
     }
+    
+    //////////////////////////////////////////////////////////////
+    
+    public void doICP() {
+        
+    }
+    
+    //////////////////////////////////////////////////////////////
     
     private double scale;
     private int centerX, centerY;
