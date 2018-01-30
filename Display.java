@@ -216,7 +216,7 @@ public class Display extends JPanel {
         // Creating Points
         points = generateArray();
         calcBounds();
-        doICP(reference, 1);
+        doICP(reference, SINGLE_STEP? 0 : 5000);
         new javax.swing.Timer((int)(1000/FPS), evt -> {
             drawRev++;
             if (drawRev >= numRevs) drawRev = 0;
@@ -280,14 +280,15 @@ public class Display extends JPanel {
     }
     
     public static final double ZOOM_RATE = 1.4;
-    int lastNumIters = 1;
     public void onKey(int code) {
         if (code == KeyEvent.VK_MINUS)
             scaleFactor /= ZOOM_RATE;
         if (code == KeyEvent.VK_EQUALS || code == KeyEvent.VK_PLUS)
             scaleFactor *= ZOOM_RATE;
         if (code == KeyEvent.VK_SPACE)
-            doICP(reference, ++lastNumIters);
+            doICP(reference, 1);
+        if (code == KeyEvent.VK_L)
+            connectPoints = !connectPoints;
         calcBounds();
         repaint();
     }
@@ -396,14 +397,15 @@ public class Display extends JPanel {
         new Segment(new Line(-1, 0, REFM_SIZE2), -REFM_SIZE, REFM_SIZE)
     });
     private ReferenceModel transReference;
-    private Transform icpTrans;
+    private Transform icpTrans = new Transform();
     
-    public static final double OUTLIER_THRESH = 1000;
+    public static final double OUTLIER_THRESH = 300;
+    public static final boolean SINGLE_STEP = true;
     private ArrayList<PointPair> pairs = new ArrayList<>();
-    public Transform doICP(ReferenceModel reference, int iterations) {//iterations = 2000;
+    public Transform doICP(ReferenceModel reference, int iterations) {
         debug("Doing ICP registration ("+iterations+" iters)...");
         long startTime = System.nanoTime();
-        Transform trans = new Transform();
+        Transform trans = icpTrans;
         for (int n = 0; n < iterations+1; n++) {
             /// get pairs of corresponding points
             Transform transInv = trans.inverse();
@@ -497,7 +499,8 @@ public class Display extends JPanel {
     }
     
     public static final float POINT_ALPHA = 0.9f;
-    public static final boolean DRAW_FRAMES = true;
+    public static final boolean DRAW_FRAMES = false;
+    public boolean connectPoints = true;
     public int drawRev = 1;
     public int numRevs;
     public void paint(Graphics g) {
@@ -508,10 +511,16 @@ public class Display extends JPanel {
         g.setFont(font);
         //g.drawString("insert text here", 20, 50);
         
-        // Draw Points
+        // Draw stuff
         scale = Math.min((double)getWidth()/widthMilli, (double)getHeight()/heightMilli);
         centerX = getWidth()/2;
         centerY = getHeight()/2;
+        
+        g.setColor(Color.RED);
+        for (PointPair pair : pairs) {
+            drawLine(g, pair.a, icpTrans.apply(pair.b));
+        }
+        
         int[] xPts = new int[points.length];
         int[] yPts = new int[points.length];
         Color[] colors = new Color[points.length];
@@ -525,8 +534,10 @@ public class Display extends JPanel {
             colors[numPts] = p.good? new Color(0f, 1f, 0f, POINT_ALPHA) : new Color(1f, 1f, 1f, POINT_ALPHA);
             numPts++;
         }
-        g.setColor(new Color(1f, 1f, 1f, 0.2f));
-        g.drawPolygon(xPts, yPts, numPts);
+        if (connectPoints) {
+            g.setColor(new Color(1f, 1f, 1f, 0.2f));
+            g.drawPolygon(xPts, yPts, numPts);
+        }
         for (int i = 0; i < numPts; i++) {
             int x = xPts[i], y = yPts[i];
             g.setColor(colors[i]);
@@ -542,10 +553,6 @@ public class Display extends JPanel {
             drawLine(g, p, rp);
         }
         
-        for (PointPair pair : pairs) {
-            drawLine(g, pair.a, icpTrans.apply(pair.b));
-        }
-        
         int[] originPos = getDrawLoc(Point.fromRect(0, 0));
         g.setColor(Color.WHITE);
         g.drawOval(originPos[0]-4, originPos[1]-4, 8, 8);
@@ -553,7 +560,7 @@ public class Display extends JPanel {
     }
     
     public static final int REVS_TO_READ = 1;
-    public static final boolean CULL_CLOSE = true;
+    public static final boolean CULL_CLOSE = false;
     public static final String dataFile = "points";//"data_cube";
     public Point[] generateArray() {
         debug("Loading data...");
