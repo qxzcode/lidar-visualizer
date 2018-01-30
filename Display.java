@@ -29,7 +29,7 @@ class Point implements Comparable<Point> {
     }
     
     public static Point fromRect(double x, double y) {
-        return new Point(x, y, Math.atan2(y, x), Math.hypot(x, y));
+        return new Point(x, y, 0, 0);//, Math.atan2(y, x), Math.hypot(x, y));
     }
     
     public double getDistanceSq(Point p) {
@@ -216,7 +216,7 @@ public class Display extends JPanel {
         // Creating Points
         points = generateArray();
         calcBounds();
-        debug(doICP(reference, 1));
+        doICP(reference, 1);
         new javax.swing.Timer((int)(1000/FPS), evt -> {
             drawRev++;
             if (drawRev >= numRevs) drawRev = 0;
@@ -287,7 +287,7 @@ public class Display extends JPanel {
         if (code == KeyEvent.VK_EQUALS || code == KeyEvent.VK_PLUS)
             scaleFactor *= ZOOM_RATE;
         if (code == KeyEvent.VK_SPACE)
-            debug(doICP(reference, ++lastNumIters));
+            doICP(reference, ++lastNumIters);
         calcBounds();
         repaint();
     }
@@ -313,23 +313,29 @@ public class Display extends JPanel {
     
     class Transform {
         // rotate by theta about the origin, then translate by <tx, ty>
-        public double theta, tx, ty;
+        public final double theta, tx, ty;
+        protected final double sin, cos; // cache these
         public Transform() {
             theta = 0;
             tx = ty = 0;
+            sin = 0.0;
+            cos = 1.0;
         }
         public Transform(double theta, double tx, double ty) {
+            this(theta, tx, ty, Math.sin(theta), Math.cos(theta));
+        }
+        public Transform(double theta, double tx, double ty, double sin, double cos) {
             this.theta = theta;
             this.tx = tx;
             this.ty = ty;
+            this.sin = sin;
+            this.cos = cos;
         }
         public Point apply(Point p) {
-            double sin = Math.sin(theta), cos = Math.cos(theta);
             return Point.fromRect(p.x*cos - p.y*sin + tx,
                                   p.x*sin + p.y*cos + ty);
         }
         public Line apply(Line l) {
-            double sin = Math.sin(theta), cos = Math.cos(theta);
             return new Line(l.vx*cos - l.vy*sin,
                             l.vx*sin + l.vy*cos,
                             l.x0*cos - l.y0*sin + tx,
@@ -346,10 +352,10 @@ public class Display extends JPanel {
             return new ReferenceModel(ss);
         }
         public Transform inverse() {
-            double sin = Math.sin(theta), cos = Math.cos(theta);
             return new Transform(-theta,
                                  -tx*cos - ty*sin,
-                                  tx*sin - ty*cos);
+                                  tx*sin - ty*cos,
+                                 -sin, cos);
         }
         public String toString() {
             return "["+Math.toDegrees(theta)+"° <"+tx+", "+ty+">]";
@@ -382,53 +388,60 @@ public class Display extends JPanel {
     }
     
     public static final double REFM_SIZE = 4000;
+    public static final double REFM_SIZE2 = 3400;
     ReferenceModel reference = new ReferenceModel(new Segment[] {
-        new Segment(new Line(0, +1, REFM_SIZE), -REFM_SIZE, REFM_SIZE),
-        new Segment(new Line(0, -1, REFM_SIZE), -REFM_SIZE, REFM_SIZE),
-        new Segment(new Line(+1, 0, REFM_SIZE), -REFM_SIZE, REFM_SIZE),
-        new Segment(new Line(-1, 0, REFM_SIZE), -REFM_SIZE, REFM_SIZE)
+        new Segment(new Line(0, +1, REFM_SIZE), -REFM_SIZE2, REFM_SIZE2),
+        new Segment(new Line(0, -1, REFM_SIZE), -REFM_SIZE2, REFM_SIZE2),
+        new Segment(new Line(+1, 0, REFM_SIZE2), -REFM_SIZE, REFM_SIZE),
+        new Segment(new Line(-1, 0, REFM_SIZE2), -REFM_SIZE, REFM_SIZE)
     });
-    ReferenceModel transReference;
-    Transform icpTrans;
+    private ReferenceModel transReference;
+    private Transform icpTrans;
     
     public static final double OUTLIER_THRESH = 1000;
-    ArrayList<PointPair> pairs;
-    public Transform doICP(ReferenceModel reference, int iterations) {
-        debug("Doing ICP registration...");
+    private ArrayList<PointPair> pairs = new ArrayList<>();
+    public Transform doICP(ReferenceModel reference, int iterations) {//iterations = 2000;
+        debug("Doing ICP registration ("+iterations+" iters)...");
         long startTime = System.nanoTime();
         Transform trans = new Transform();
-        for (int n = 0; n < iterations; n++) {
+        for (int n = 0; n < iterations+1; n++) {
             /// get pairs of corresponding points
             Transform transInv = trans.inverse();
-            pairs = new ArrayList<>();
+            pairs.clear();
+            
+            double SumXa = 0, SumXb = 0, SumYa = 0, SumYb = 0;
+            double Sxx = 0, Sxy = 0, Syx = 0, Syy = 0;
             for (Point p : points) {
                 Point p2 = transInv.apply(p);
                 Point rp = reference.getClosestPoint(p2);
                 p.good = p2.getDistanceSq(rp) < OUTLIER_THRESH*OUTLIER_THRESH;
                 if (!p.good) continue;
                 pairs.add(new PointPair(p, rp));
+                
+                // Compute the terms:
+                SumXa += p.x;
+                SumYa += p.y;
+                
+                SumXb += rp.x;
+                SumYb += rp.y;
+                
+                Sxx += p.x * rp.x;
+                Sxy += p.x * rp.y;
+                Syx += p.y * rp.x;
+                Syy += p.y * rp.y;
             }
+            
+            // TODO: compute the mean & [variance|std. dev.] for the point distances,
+            //       then reject outliers whose distance is more than mean+[some multiple of variance]
+            // (also look up popular variants of ICP that deal with outliers)
+            
+            if (n==iterations) break;
             
             /// calculate the new transform
             // code based on http://mrpt.ual.es/reference/devel/se2__l2_8cpp_source.html#l00158
-            final int N = pairs.size();debug(N);if(N==0)return new Transform();
+            final int N = pairs.size();
+            if (N==0) return new Transform(); // TODO: handle this better, or avoid it
             final double N_inv = 1.0 / N;
-            double SumXa = 0, SumXb = 0, SumYa = 0, SumYb = 0;
-            double Sxx = 0, Sxy = 0, Syx = 0, Syy = 0;
-            
-            for (PointPair p : pairs) {
-                // Compute the terms:
-                SumXa += p.a.x;
-                SumYa += p.a.y;
-                
-                SumXb += p.b.x;
-                SumYb += p.b.y;
-                
-                Sxx += p.a.x * p.b.x;
-                Sxy += p.a.x * p.b.y;
-                Syx += p.a.y * p.b.x;
-                Syy += p.a.y * p.b.y;
-            }
             
             final double mean_x_a = SumXa * N_inv;
             final double mean_y_a = SumYa * N_inv;
@@ -439,19 +452,23 @@ public class Display extends JPanel {
             final double Ax = N * (Sxx + Syy) - SumXa * SumXb - SumYa * SumYb;
             final double Ay = SumXa * SumYb + N * (Syx - Sxy) - SumXb * SumYa;
             
-            trans.theta = (Ax == 0 && Ay == 0)? 0.0 : Math.atan2(Ay, Ax);
+            final double theta = (Ax == 0 && Ay == 0)? 0.0 : Math.atan2(Ay, Ax);
             
-            final double ccos = Math.cos(trans.theta);
-            final double csin = Math.sin(trans.theta);
+            final double ccos = Math.cos(theta);
+            final double csin = Math.sin(theta);
             
-            trans.tx = mean_x_a - mean_x_b * ccos + mean_y_b * csin;
-            trans.ty = mean_y_a - mean_x_b * csin - mean_y_b * ccos;
+            final double tx = mean_x_a - mean_x_b * ccos + mean_y_b * csin;
+            final double ty = mean_y_a - mean_x_b * csin - mean_y_b * ccos;
             
-            // trans.tx = mean_x_a - mean_x_b;
-            // trans.ty = mean_y_a - mean_y_b;
+            if (theta==trans.theta && tx==trans.tx && ty==trans.ty) {
+                debug("Converged on iteration n="+n);
+                break;
+            }
+            trans = new Transform(theta, tx, ty, csin, ccos);
         }
         long endTime = System.nanoTime();
         debug("Done ("+((endTime-startTime)/1000000)+" ms)");
+        debug(trans);
         icpTrans = trans;
         transReference = trans.apply(reference);
         return trans;
@@ -536,13 +553,14 @@ public class Display extends JPanel {
     }
     
     public static final int REVS_TO_READ = 1;
-    public static boolean CULL_CLOSE = true;
+    public static final boolean CULL_CLOSE = true;
+    public static final String dataFile = "points";//"data_cube";
     public Point[] generateArray() {
         debug("Loading data...");
         ArrayList<Point> points = new ArrayList<Point>();
         
         try {
-            BufferedReader br = new BufferedReader(new FileReader(new File("data_cube_proc.txt")));
+            BufferedReader br = new BufferedReader(new FileReader(new File(dataFile+"_proc.txt")));
             
             String str;
             double lastTheta = -1;
