@@ -567,7 +567,8 @@ public class Display extends JPanel {
         ArrayList<Point> points = new ArrayList<Point>();
         
         try {
-            BufferedReader br = new BufferedReader(new FileReader(new File(dataFile+"_proc.txt")));
+            InputStream in = Display.class.getResourceAsStream(dataFile+"_proc.txt");
+            BufferedReader br = new BufferedReader(new InputStreamReader(in));
             
             String str;
             double lastTheta = -1;
@@ -587,6 +588,7 @@ public class Display extends JPanel {
             numRevs = rev;
         } catch (Exception e) {
             e.printStackTrace();
+            System.exit(1);
         }
         
         debug("Read "+points.size()+" points");
