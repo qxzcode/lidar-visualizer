@@ -16,7 +16,7 @@ class Point implements Comparable<Point> {
     public int revNum;
     
     public boolean good = true;
-
+    
     private Point(double x, double y, double theta, double dist) {
         this.x = x;
         this.y = y;
@@ -574,7 +574,7 @@ public class Display extends JPanel {
         ArrayList<Point> points = new ArrayList<Point>();
         
         try {
-            InputStream in = Display.class.getResourceAsStream(dataFile+"_proc.txt");
+            InputStream in = Display.class.getResourceAsStream("data/"+dataFile+".txt");
             BufferedReader br = new BufferedReader(new InputStreamReader(in));
             
             String str;

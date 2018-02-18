@@ -1,4 +1,4 @@
 #!/bin/zsh
 clear
-rm *.class
-$JAVA_HOME/bin/javac Display.java && java Display
+rm bin/*.class
+$JAVA_HOME/bin/javac -d bin/ src/*.java && cp -r data/ bin/ && cd bin/ && java Display
