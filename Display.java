@@ -306,9 +306,11 @@ public class Display extends JPanel {
     
     class PointPair {
         public Point a, b;
-        public PointPair(Point a, Point b) {
+        double dist;
+        public PointPair(Point a, Point b, double dist) {
             this.a = a;
             this.b = b;
+            this.dist = dist;
         }
     }
     
@@ -399,9 +401,11 @@ public class Display extends JPanel {
     private ReferenceModel transReference;
     private Transform icpTrans = new Transform();
     
-    public static final double OUTLIER_THRESH = 300;
+    public static final double OUTLIER_THRESH = 0.5; // multiplier of mean
     public static final boolean SINGLE_STEP = true;
     private ArrayList<PointPair> pairs = new ArrayList<>();
+    double dbgLength;
+    private double lastMean = Double.POSITIVE_INFINITY;
     public Transform doICP(ReferenceModel reference, int iterations) {
         debug("Doing ICP registration ("+iterations+" iters)...");
         long startTime = System.nanoTime();
@@ -411,14 +415,20 @@ public class Display extends JPanel {
             Transform transInv = trans.inverse();
             pairs.clear();
             
+            double sumDists = 0;
+            final double threshold = dbgLength = lastMean*OUTLIER_THRESH;
+            
             double SumXa = 0, SumXb = 0, SumYa = 0, SumYb = 0;
             double Sxx = 0, Sxy = 0, Syx = 0, Syy = 0;
             for (Point p : points) {
                 Point p2 = transInv.apply(p);
                 Point rp = reference.getClosestPoint(p2);
-                p.good = p2.getDistanceSq(rp) < OUTLIER_THRESH*OUTLIER_THRESH;
+                double dist = p2.getDistance(rp);
+                sumDists += dist;
+                
+                p.good = dist < threshold;
                 if (!p.good) continue;
-                pairs.add(new PointPair(p, rp));
+                pairs.add(new PointPair(p, rp, dist));
                 
                 // Compute the terms:
                 SumXa += p.x;
@@ -433,11 +443,8 @@ public class Display extends JPanel {
                 Syy += p.y * rp.y;
             }
             
-            // TODO: compute the mean & [variance|std. dev.] for the point distances,
-            //       then reject outliers whose distance is more than mean+[some multiple of variance]
-            // (also look up popular variants of ICP that deal with outliers)
-            
             if (n==iterations) break;
+            lastMean = sumDists / pairs.size();
             
             /// calculate the new transform
             // code based on http://mrpt.ual.es/reference/devel/se2__l2_8cpp_source.html#l00158
@@ -516,10 +523,10 @@ public class Display extends JPanel {
         centerX = getWidth()/2;
         centerY = getHeight()/2;
         
-        g.setColor(Color.RED);
-        for (PointPair pair : pairs) {
-            drawLine(g, pair.a, icpTrans.apply(pair.b));
-        }
+        // g.setColor(Color.RED);
+        // for (PointPair pair : pairs) {
+        //     drawLine(g, pair.a, icpTrans.apply(pair.b));
+        // }
         
         int[] xPts = new int[points.length];
         int[] yPts = new int[points.length];
@@ -544,7 +551,7 @@ public class Display extends JPanel {
             g.fillRect(x - radius, y - radius, radius * 2, radius * 2);
         }
         
-        transReference.draw(g);
+        // transReference.draw(g);
         
         if (selectedI >= 0) {
             Point p = points[selectedI];
@@ -556,12 +563,12 @@ public class Display extends JPanel {
         int[] originPos = getDrawLoc(Point.fromRect(0, 0));
         g.setColor(Color.WHITE);
         g.drawOval(originPos[0]-4, originPos[1]-4, 8, 8);
-        g.drawLine(20, 20, 20+(int)(OUTLIER_THRESH*scale), 20);
+        g.drawLine(20, 20, 20+(int)(dbgLength*scale), 20);
     }
     
-    public static final int REVS_TO_READ = 1;
-    public static final boolean CULL_CLOSE = false;
-    public static final String dataFile = "points";//"data_cube";
+    public static final int REVS_TO_READ = 5;
+    public static final boolean CULL_CLOSE = true;
+    public static final String dataFile = "new_points";//"data_cube";
     public Point[] generateArray() {
         debug("Loading data...");
         ArrayList<Point> points = new ArrayList<Point>();
