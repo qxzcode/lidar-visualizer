@@ -1,4 +1,7 @@
 import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Stroke;
+import java.awt.BasicStroke;
 import java.awt.Color;
 
 class ReferenceModel {
@@ -21,9 +24,9 @@ class ReferenceModel {
     private static final Point TOWER11 = Point.fromRect(TOWER_DEPTH, +TOWER_WIDTH/2);
     
     public static final ReferenceModel TOWER = new ReferenceModel(
-        new Segment(TOWER00, TOWER10), // bottom (-Y) face
-        new Segment(TOWER00, TOWER01), // front face
-        new Segment(TOWER01, TOWER11)  // top (+Y) face
+        // new Segment(TOWER00, TOWER10), // bottom (-Y) face
+        new Segment(TOWER00, TOWER01) // front face
+        // new Segment(TOWER01, TOWER11)  // top (+Y) face
     );
     
     
@@ -34,7 +37,7 @@ class ReferenceModel {
     }
     
     public Point getClosestPoint(Point p) {
-        double minDist = Double.MAX_VALUE;
+        double minDist = Double.POSITIVE_INFINITY;
         Segment minSeg = null;
         for (Segment s : segments) {
             double dist = s.getDistanceSq(p);
@@ -46,11 +49,16 @@ class ReferenceModel {
         return minSeg.getClosestPoint(p);
     }
     
+    public static final Stroke stroke = new BasicStroke(8.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
     public void draw(Graphics g) {
+        Graphics2D g2 = (Graphics2D) g;
+        Stroke oldStroke = g2.getStroke();
+        g2.setStroke(stroke);
         g.setColor(Color.ORANGE);
         for (Segment s : segments) {
             Display.disp.drawLine(g, s.pMin, s.pMax);
         }
+        g2.setStroke(oldStroke);
     }
     
     public String toString() {

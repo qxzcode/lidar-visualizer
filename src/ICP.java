@@ -4,8 +4,9 @@ public class ICP {
     
     private final Display disp;
     
-    public ICP(Display d) {
+    public ICP(Display d, Point guessPos) {
         disp = d;
+        icpTrans = new Transform(0, guessPos.x, guessPos.y);
     }
     
     
@@ -21,9 +22,9 @@ public class ICP {
     
     public ReferenceModel reference = ReferenceModel.TOWER;
     public ReferenceModel transReference;
-    public Transform icpTrans = new Transform(0.0, 7000, -2000);
+    public Transform icpTrans;
     
-    public static final double OUTLIER_THRESH = 1.9; // multiplier of mean
+    public static final double OUTLIER_THRESH = 1.0; // multiplier of mean
     public ArrayList<PointPair> pairs = new ArrayList<>();
     public double dbgLength;
     public double lastMean = Double.POSITIVE_INFINITY;

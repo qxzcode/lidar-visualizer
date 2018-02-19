@@ -21,6 +21,7 @@ public class Display extends JPanel {
     private JLabel display;
     
     public Point[] points;
+    public Point averagePoint;
     
     public final ICP icp;
     public static final boolean SINGLE_STEP = true;
@@ -73,8 +74,8 @@ public class Display extends JPanel {
         
         // Creating Points
         points = generateArray();
-        calcBounds();
-        icp = new ICP(this);
+        calcBounds(true);
+        icp = new ICP(this, averagePoint);
         icp.doICP(SINGLE_STEP? 0 : 5000);
         new javax.swing.Timer((int)(1000/FPS), evt -> {
             drawRev++;
@@ -122,7 +123,11 @@ public class Display extends JPanel {
             icp.doICP(1);
         if (code == KeyEvent.VK_L)
             connectPoints = !connectPoints;
-        calcBounds();
+        if (code == KeyEvent.VK_I)
+            drawICP = !drawICP;
+        if (code == KeyEvent.VK_D)
+            debugICP = !debugICP;
+        calcBounds(false);
         repaint();
     }
     
@@ -155,9 +160,10 @@ public class Display extends JPanel {
         g.drawLine(pos1[0], pos1[1], pos2[0], pos2[1]);
     }
     
-    public static final float POINT_ALPHA = 0.9f;
+    public static final float POINT_ALPHA = 1.0f;
     public static final boolean DRAW_FRAMES = false;
-    public static final boolean DRAW_ICP = true;
+    public boolean drawICP = true;
+    public boolean debugICP = true;
     public boolean connectPoints = true;
     public int drawRev = 1;
     public int numRevs;
@@ -178,7 +184,7 @@ public class Display extends JPanel {
         centerX = getWidth()/2;
         centerY = getHeight()/2;
         
-        if (DRAW_ICP) {
+        if (drawICP && debugICP) {
             g.setColor(Color.RED);
             for (ICP.PointPair pair : icp.pairs) {
                 drawLine(g, pair.a, icp.icpTrans.apply(pair.b));
@@ -195,7 +201,7 @@ public class Display extends JPanel {
             int[] pos = getDrawLoc(p);
             xPts[numPts] = pos[0];
             yPts[numPts] = pos[1];
-            colors[numPts] = p.good && DRAW_ICP? new Color(0f, 1f, 0f, POINT_ALPHA) : new Color(1f, 1f, 1f, POINT_ALPHA);
+            colors[numPts] = p.good && drawICP && debugICP? new Color(0f, 1f, 0f, POINT_ALPHA) : new Color(1f, 1f, 1f, POINT_ALPHA);
             numPts++;
         }
         if (connectPoints) {
@@ -208,10 +214,10 @@ public class Display extends JPanel {
             g.fillRect(x - radius, y - radius, radius * 2, radius * 2);
         }
         
-        if (DRAW_ICP)
+        if (drawICP)
             icp.transReference.draw(g);
         
-        if (selectedI >= 0 && DRAW_ICP) {
+        if (selectedI >= 0 && drawICP && debugICP) {
             Point p = points[selectedI];
             Point rp = icp.transReference.getClosestPoint(p);
             g.setColor(Color.RED);
@@ -224,13 +230,14 @@ public class Display extends JPanel {
         g.drawLine(20, 20, 20+(int)(icp.dbgLength*scale), 20);
     }
     
-    public static final int REVS_TO_READ = 5000;
+    public static final int REVS_TO_READ = Integer.MAX_VALUE;
     public static final boolean CULL_CLOSE = false;
     public static final boolean CULL_OTHERS = true;
-    public static final String dataFile = "new_points";//"data_cube";
+    public static final String dataFile = "right";//"data_cube";
     public Point[] generateArray() {
         debug("Loading data...");
         ArrayList<Point> points = new ArrayList<Point>();
+        double sumX = 0, sumY = 0;
         
         try {
             InputStream in = Display.class.getResourceAsStream("data/"+dataFile+".txt");
@@ -242,15 +249,18 @@ public class Display extends JPanel {
             while ((str = br.readLine()) != null) {
                 String[] polar = str.split(" ");
                 double r = Double.parseDouble(polar[1]), theta = Math.toRadians(Double.parseDouble(polar[0]));
+                if (Double.isNaN(r) || Double.isNaN(theta)) throw new RuntimeException("NaN in data!");
+                if (theta < lastTheta) rev++;
+                lastTheta = theta;
                 if (r == 0) continue;
                 if (CULL_CLOSE && r < 1900) continue;
-                Point p = Point.fromPolar(theta, r);
-                if (p.theta < lastTheta) rev++;
+                Point p = Point.fromPolar(-theta, r); // flip in Y
                 if (rev >= REVS_TO_READ) break;
-                lastTheta = p.theta;
                 p.revNum = rev;
                 if (CULL_OTHERS && !keepPoint(p)) continue;
                 points.add(p);
+                sumX += p.x;
+                sumY += p.y;
             }
             numRevs = rev;
         } catch (Exception e) {
@@ -258,18 +268,19 @@ public class Display extends JPanel {
             System.exit(1);
         }
         
-        debug("Read "+points.size()+" points");
+        debug("Read "+points.size()+" points ("+numRevs+" revolutions)");
         Collections.sort(points);
+        averagePoint = Point.fromRect(sumX/points.size(), sumY/points.size());
         return points.toArray(new Point[points.size()]);
     }
     
     public boolean keepPoint(Point p) {
         return p.x > 6000 && p.x < 8000 &&
-               p.y > -4000 && p.y < 0;
+               p.y > -7000 && p.y < 7000;
     }
     
     public static double scaleFactor = 1.0, camX = 0, camY = 0;
-    public void calcBounds() {
+    public void calcBounds(boolean setCam) {
         double minX = Double.POSITIVE_INFINITY, maxX = Double.NEGATIVE_INFINITY;
         double minY = Double.POSITIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY;
         for (Point p : points) {
@@ -279,10 +290,12 @@ public class Display extends JPanel {
             if (p.y > maxY) maxY = p.y;
         }
         double dx = maxX-minX, dy = maxY-minY;
-        widthMilli = (int)(dx*1.1 / scaleFactor);
-        heightMilli = (int)(dy*1.1 / scaleFactor);
-        camX = (maxX + minX) / 2;
-        camY = (maxY + minY) / 2;
+        widthMilli = (int)(dx*1.2 / scaleFactor);
+        heightMilli = (int)(dy*1.2 / scaleFactor);
+        if (setCam) {
+            camX = (maxX + minX) / 2;
+            camY = (maxY + minY) / 2;
+        }
     }
     
     public static Display disp;
