@@ -143,11 +143,11 @@ public class Display extends JPanel {
         }
     }
     
-    public ReferenceModel reference = ReferenceModel.BOX;
+    public ReferenceModel reference = ReferenceModel.TOWER;
     private ReferenceModel transReference;
     private Transform icpTrans = new Transform(0.0, 7000, -2000);
     
-    public static final double OUTLIER_THRESH = 1.0; // multiplier of mean
+    public static final double OUTLIER_THRESH = 1.9; // multiplier of mean
     public static final boolean SINGLE_STEP = true;
     private ArrayList<PointPair> pairs = new ArrayList<>();
     double dbgLength;
@@ -223,7 +223,7 @@ public class Display extends JPanel {
             trans = new Transform(theta, tx, ty, csin, ccos);
         }
         long endTime = System.nanoTime();
-        debug("Done ("+((endTime-startTime)/1000000)+" ms)");
+        debug("Done ("+Math.round((endTime-startTime)/1000000f)+" ms)");
         debug(trans);
         icpTrans = trans;
         transReference = trans.apply(reference);
@@ -322,7 +322,8 @@ public class Display extends JPanel {
     }
     
     public static final int REVS_TO_READ = 5000;
-    public static final boolean CULL_CLOSE = true;
+    public static final boolean CULL_CLOSE = false;
+    public static final boolean CULL_OTHERS = true;
     public static final String dataFile = "new_points";//"data_cube";
     public Point[] generateArray() {
         debug("Loading data...");
@@ -345,7 +346,7 @@ public class Display extends JPanel {
                 if (rev >= REVS_TO_READ) break;
                 lastTheta = p.theta;
                 p.revNum = rev;
-                if (!keepPoint(p)) continue;
+                if (CULL_OTHERS && !keepPoint(p)) continue;
                 points.add(p);
             }
             numRevs = rev;

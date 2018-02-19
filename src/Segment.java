@@ -14,6 +14,16 @@ public class Segment {
     
     public Segment(Point p0, Point p1) {
         this(new Line(p0, p1), 0, 1);
+        normalize();
+    }
+    
+    private void normalize() {
+        double mSq = line.vx*line.vx + line.vy*line.vy;
+        double m = Math.sqrt(mSq);
+        line.vx /= m;
+        line.vy /= m;
+        line.r /= m;
+        tMax *= m;
     }
     
     public double getDistance(Point p) {
@@ -36,6 +46,10 @@ public class Segment {
         if (t <= tMin) return pMin;
         if (t >= tMax) return pMax;
         return line.getPoint(t);
+    }
+    
+    public String toString() {
+        return "Segment("+line+", ["+tMin+", "+tMax+"])";
     }
     
 }

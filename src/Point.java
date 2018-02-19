@@ -39,6 +39,6 @@ public class Point implements Comparable<Point> {
     public double getY() { return y; }
     
     public String toString() {
-        return "(" + x + " " + y + ")";
+        return "(" + x + ", " + y + ")";
     }
 }

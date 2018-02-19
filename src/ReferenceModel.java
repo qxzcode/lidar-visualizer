@@ -5,19 +5,11 @@ class ReferenceModel {
     
     public static final double REFM_SIZE = 4000;
     public static final double REFM_SIZE2 = 3400;
-    public static final Point BOX00 = Point.fromRect(-REFM_SIZE2, -REFM_SIZE);
-    public static final Point BOX01 = Point.fromRect(-REFM_SIZE2, +REFM_SIZE);
-    public static final Point BOX10 = Point.fromRect(+REFM_SIZE2, -REFM_SIZE);
-    public static final Point BOX11 = Point.fromRect(+REFM_SIZE2, +REFM_SIZE);
     public static final ReferenceModel BOX = new ReferenceModel(new Segment[] {
-        // new Segment(new Line(0, +1, REFM_SIZE), -REFM_SIZE2, REFM_SIZE2),
-        // new Segment(new Line(0, -1, REFM_SIZE), -REFM_SIZE2, REFM_SIZE2),
-        // new Segment(new Line(+1, 0, REFM_SIZE2), -REFM_SIZE, REFM_SIZE),
-        // new Segment(new Line(-1, 0, REFM_SIZE2), -REFM_SIZE, REFM_SIZE)
-        new Segment(BOX00, BOX01),
-        // new Segment(BOX01, BOX11),
-        // new Segment(BOX11, BOX10),
-        // new Segment(BOX10, BOX00),
+        new Segment(new Line(0, +1, REFM_SIZE), -REFM_SIZE2, REFM_SIZE2),
+        new Segment(new Line(0, -1, REFM_SIZE), -REFM_SIZE2, REFM_SIZE2),
+        new Segment(new Line(+1, 0, REFM_SIZE2), -REFM_SIZE, REFM_SIZE),
+        new Segment(new Line(-1, 0, REFM_SIZE2), -REFM_SIZE, REFM_SIZE)
     });
     
     public static final double IN_TO_MM = 25.4; // 1 inch = 25.4 millimeters
@@ -36,9 +28,11 @@ class ReferenceModel {
     
     
     public final Segment[] segments;
+    
     public ReferenceModel(Segment... ss) {
         segments = ss;
     }
+    
     public Point getClosestPoint(Point p) {
         double minDist = Double.MAX_VALUE;
         Segment minSeg = null;
@@ -51,10 +45,19 @@ class ReferenceModel {
         }
         return minSeg.getClosestPoint(p);
     }
+    
     public void draw(Graphics g) {
         g.setColor(Color.ORANGE);
         for (Segment s : segments) {
             Display.disp.drawLine(g, s.pMin, s.pMax);
         }
+    }
+    
+    public String toString() {
+        String str = "[";
+        for (Segment s : segments) {
+            str += "\n  "+s;
+        }
+        return str+"\n]";
     }
 }
