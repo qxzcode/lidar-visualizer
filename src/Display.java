@@ -5,6 +5,7 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.image.*;
 import javax.swing.*;
+
 import javax.imageio.*;
 import java.io.*;
 import java.awt.geom.*;
@@ -18,12 +19,10 @@ public class Display extends JPanel {
     private final int radius        = 2;
     private final Font font         = new Font("Consolas", Font.PLAIN, 30);
     
-    private JLabel display;
-    
-    public Point[] points;
+    public ArrayList<Point> points;
     public Point averagePoint;
     
-    public final ICP icp;
+    public ICP icp;
     public static final boolean SINGLE_STEP = true;
     
     public static final double FPS = 10;
@@ -33,13 +32,6 @@ public class Display extends JPanel {
         setSize(new Dimension(width, height)); 
         setPreferredSize(new Dimension(width, height));
         setLayout(null);
-        
-        // In case we need a display
-        display = new JLabel();
-        display.setBounds(0, 0, width, height / 8);
-        display.setFont(font);
-        display.setHorizontalTextPosition(JLabel.LEFT);
-        add(display);
         
         setFocusable(true);
         requestFocus();
@@ -68,15 +60,12 @@ public class Display extends JPanel {
         addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
-                onKey(e.getKeyCode());
+                onKey(e.getKeyCode(), (e.getModifiersEx() & KeyEvent.SHIFT_DOWN_MASK) != 0);
             }
         });
         
         // Creating Points
-        points = generateArray();
-        calcBounds(true);
-        icp = new ICP(this, averagePoint);
-        icp.doICP(SINGLE_STEP? 0 : 5000);
+        reset(0, false);
         new javax.swing.Timer((int)(1000/FPS), evt -> {
             drawRev++;
             if (drawRev >= numRevs) drawRev = 0;
@@ -97,8 +86,8 @@ public class Display extends JPanel {
         
         double minDist = Double.MAX_VALUE;
         int minI = -1;
-        for (int i = 0; i < points.length; i++) {
-            Point p = points[i];
+        for (int i = 0; i < points.size(); i++) {
+            Point p = points.get(i);
             double dx = p.x-m.x, dy = p.y-m.y;
             double dist = dx*dx + dy*dy;
             if (dist < minDist) {
@@ -114,20 +103,32 @@ public class Display extends JPanel {
     }
     
     public static final double ZOOM_RATE = 1.4;
-    public void onKey(int code) {
+    public void onKey(int code, boolean shift) {
         if (code == KeyEvent.VK_MINUS)
             scaleFactor /= ZOOM_RATE;
         if (code == KeyEvent.VK_EQUALS || code == KeyEvent.VK_PLUS)
             scaleFactor *= ZOOM_RATE;
+        
         if (code == KeyEvent.VK_SPACE)
             icp.doICP(1);
+        
         if (code == KeyEvent.VK_L)
             connectPoints = !connectPoints;
         if (code == KeyEvent.VK_I)
             drawICP = !drawICP;
         if (code == KeyEvent.VK_D)
             debugICP = !debugICP;
-        calcBounds(false);
+        if (code == KeyEvent.VK_F)
+            drawFrames = !drawFrames;
+        
+        int n = code - KeyEvent.VK_0 - 1;
+        if (n == -1) n = 9;
+        if (n >= 0 && n < DATA_FILES.length) {
+            reset(n, shift);
+        } else {
+            calcBounds(false);
+        }
+        
         repaint();
     }
     
@@ -161,23 +162,34 @@ public class Display extends JPanel {
     }
     
     public static final float POINT_ALPHA = 1.0f;
-    public static final boolean DRAW_FRAMES = false;
-    public boolean drawICP = true;
-    public boolean debugICP = true;
+    public static boolean drawFrames = false;
+    public boolean drawICP = false;
+    public boolean debugICP = false;
     public boolean connectPoints = true;
-    public int drawRev = 1;
+    public int drawRev;
     public int numRevs;
     public void paint(Graphics g) {
         g.setColor(Color.BLACK);
         g.fillRect(0, 0, getWidth(), getHeight());
         
-        // Draw Display
+        // Draw text
         g.setFont(font);
         g.setColor(Color.WHITE);
         if (mouseLoc != null) {
             g.drawString("Mouse: ("+(int)(mouseLoc.x)+", "+(int)(mouseLoc.y)+")",
                          20, centerY*2 - font.getSize() - 20);
         }
+        if (drawFrames) {
+            int padLen = Integer.toString(numRevs).length();
+            String str = Integer.toString(drawRev);
+            while (str.length() < padLen) str = " "+str;
+            g.drawString("Revolution: "+str+"/"+numRevs,
+                         20, centerY*2 - font.getSize()*2 - 20);
+        }
+        int dataFileNum = curDataFile + 1;
+        if (dataFileNum == 10) dataFileNum = 0;
+        g.drawString("Dataset: "+DATA_FILES[curDataFile]+" ("+dataFileNum+")",
+                         20, centerY*2 - font.getSize()*3 - 20);
         
         // Draw stuff
         scale = Math.min((double)getWidth()/widthMilli, (double)getHeight()/heightMilli);
@@ -191,13 +203,12 @@ public class Display extends JPanel {
             }
         }
         
-        int[] xPts = new int[points.length];
-        int[] yPts = new int[points.length];
-        Color[] colors = new Color[points.length];
+        int[] xPts = new int[points.size()];
+        int[] yPts = new int[points.size()];
+        Color[] colors = new Color[points.size()];
         int numPts = 0;
-        for (int i = 0; i < points.length; i++) {
-            Point p = points[i];
-            if (DRAW_FRAMES && p.revNum != drawRev) continue;
+        for (Point p : points) {
+            if (drawFrames && p.revNum != drawRev) continue;
             int[] pos = getDrawLoc(p);
             xPts[numPts] = pos[0];
             yPts[numPts] = pos[1];
@@ -218,7 +229,7 @@ public class Display extends JPanel {
             icp.transReference.draw(g);
         
         if (selectedI >= 0 && drawICP && debugICP) {
-            Point p = points[selectedI];
+            Point p = points.get(selectedI);
             Point rp = icp.transReference.getClosestPoint(p);
             g.setColor(Color.RED);
             drawLine(g, p, rp);
@@ -232,9 +243,8 @@ public class Display extends JPanel {
     
     public static final int REVS_TO_READ = Integer.MAX_VALUE;
     public static final boolean CULL_CLOSE = false;
-    public static final boolean CULL_OTHERS = true;
-    public static final String dataFile = "right";//"data_cube";
-    public Point[] generateArray() {
+    public static final boolean CULL_OTHERS = false;
+    public ArrayList<Point> generateArray(String dataFile) {
         debug("Loading data...");
         ArrayList<Point> points = new ArrayList<Point>();
         double sumX = 0, sumY = 0;
@@ -269,9 +279,13 @@ public class Display extends JPanel {
         }
         
         debug("Read "+points.size()+" points ("+numRevs+" revolutions)");
-        Collections.sort(points);
         averagePoint = Point.fromRect(sumX/points.size(), sumY/points.size());
-        return points.toArray(new Point[points.size()]);
+        sortPoints(points);
+        return points;
+    }
+    
+    public void sortPoints(List<Point> points) {
+        Collections.sort(points);
     }
     
     public boolean keepPoint(Point p) {
@@ -279,7 +293,7 @@ public class Display extends JPanel {
                p.y > -7000 && p.y < 7000;
     }
     
-    public static double scaleFactor = 1.0, camX = 0, camY = 0;
+    public static double scaleFactor, camX, camY;
     public void calcBounds(boolean setCam) {
         double minX = Double.POSITIVE_INFINITY, maxX = Double.NEGATIVE_INFINITY;
         double minY = Double.POSITIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY;
@@ -292,10 +306,37 @@ public class Display extends JPanel {
         double dx = maxX-minX, dy = maxY-minY;
         widthMilli = (int)(dx*1.2 / scaleFactor);
         heightMilli = (int)(dy*1.2 / scaleFactor);
+        widthMilli = 7000;
+        heightMilli = 13000;
         if (setCam) {
-            camX = (maxX + minX) / 2;
+            camX = 7000;//(maxX + minX) / 2;
             camY = (maxY + minY) / 2;
         }
+    }
+    
+    public static final String[] DATA_FILES = new String[] {
+        "left", "left-middle", "middle", "right-middle", "right", "right-far"
+    };
+    public int curDataFile = -1;
+    public void reset(int dataI, boolean shift) {
+        curDataFile = dataI;
+        ArrayList<Point> newPoints = generateArray(DATA_FILES[dataI]);
+        if (shift) {
+            points.addAll(newPoints);
+            sortPoints(points);
+        } else {
+            points = newPoints;
+        }
+        
+        scaleFactor = 1.0;
+        calcBounds(true);
+        
+        icp = new ICP(this, averagePoint);
+        icp.doICP(SINGLE_STEP? 0 : 5000);
+        
+        drawRev = 0;
+        selectedI = -1;
+        mouseLoc = null;
     }
     
     public static Display disp;

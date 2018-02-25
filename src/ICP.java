@@ -67,7 +67,7 @@ public class ICP {
             }
             
             if (n==iterations) break;
-            lastMean = sumDists / disp.points.length;
+            lastMean = sumDists / disp.points.size();
             
             /// calculate the new transform
             // code based on http://mrpt.ual.es/reference/devel/se2__l2_8cpp_source.html#l00158
