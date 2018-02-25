@@ -1,4 +1,5 @@
 import java.util.ArrayList;
+import java.util.Collection;
 
 public class ICP {
     
@@ -28,7 +29,7 @@ public class ICP {
     public ArrayList<PointPair> pairs = new ArrayList<>();
     public double dbgLength;
     public double lastMean = Double.POSITIVE_INFINITY;
-    public Transform doICP(int iterations) {
+    public Transform doICP(int iterations, Collection<Point> points) {
         disp.debug("Doing ICP registration ("+iterations+" iters)...");
         long startTime = System.nanoTime();
         Transform trans = icpTrans;
@@ -43,7 +44,7 @@ public class ICP {
             
             double SumXa = 0, SumXb = 0, SumYa = 0, SumYb = 0;
             double Sxx = 0, Sxy = 0, Syx = 0, Syy = 0;
-            for (Point p : disp.points) {
+            for (Point p : points) {
                 Point p2 = transInv.apply(p);
                 Point rp = reference.getClosestPoint(p2);
                 double dist = p2.getDistance(rp);
@@ -67,7 +68,7 @@ public class ICP {
             }
             
             if (n==iterations) break;
-            lastMean = sumDists / disp.points.size();
+            lastMean = sumDists / points.size();
             
             /// calculate the new transform
             // code based on http://mrpt.ual.es/reference/devel/se2__l2_8cpp_source.html#l00158
@@ -99,8 +100,8 @@ public class ICP {
             trans = new Transform(theta, tx, ty, csin, ccos);
         }
         long endTime = System.nanoTime();
-        disp.debug("Done ("+Math.round((endTime-startTime)/1000000f)+" ms)");
-        disp.debug(trans);
+        disp.debug("Done ("+Math.round((endTime-startTime)/1000000f)+" ms)\n");
+        // disp.debug(trans);
         icpTrans = trans;
         transReference = trans.apply(reference);
         return trans;

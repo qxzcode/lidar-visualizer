@@ -4,6 +4,7 @@ public class Point implements Comparable<Point> {
     public int revNum;
     
     public boolean good = true;
+    public boolean isICP = false;
     
     private Point(double x, double y, double theta, double dist) {
         this.x = x;

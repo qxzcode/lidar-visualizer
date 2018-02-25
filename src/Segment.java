@@ -48,6 +48,10 @@ public class Segment {
         return line.getPoint(t);
     }
     
+    public Point getMidpoint() {
+        return line.getPoint((tMin+tMax)/2);
+    }
+    
     public String toString() {
         return "Segment("+line+", ["+tMin+", "+tMax+"])";
     }
