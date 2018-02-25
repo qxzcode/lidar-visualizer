@@ -77,7 +77,7 @@ public class Display extends JPanel {
     public void onMouse(int mx, int my, int mdx, int mdy, boolean drag) {
         if (drag) {
             camX -= mdx / scale;
-            camY -= mdy / scale;
+            camY += mdy / scale;
             repaint();
         }
         
@@ -143,15 +143,15 @@ public class Display extends JPanel {
     private double scale;
     private int centerX, centerY;
     public int[] getDrawLoc(Point p) {
-        double actualX = (p.x-camX) * scale + centerX;
-        double actualY = (p.y-camY) * scale + centerY;
+        double actualX =  (p.x-camX) * scale + centerX;
+        double actualY = -(p.y-camY) * scale + centerY;
         return new int[] {(int)actualX,
                           (int)actualY};
     }
     
     public Point getDataLoc(int x, int y) {
-        return Point.fromRect((x-centerX) / scale + camX,
-                              (y-centerY) / scale + camY);
+        return Point.fromRect( (x-centerX) / scale + camX,
+                              -(y-centerY) / scale + camY);
     }
     
     public void drawLine(Graphics g, Point p1, Point p2) {
@@ -270,7 +270,7 @@ public class Display extends JPanel {
                 lastTheta = theta;
                 if (r == 0) continue;
                 if (CULL_CLOSE && r < 1900) continue;
-                Point p = Point.fromPolar(-theta, r); // flip in Y
+                Point p = Point.fromPolar(theta, r);
                 if (rev >= REVS_TO_READ) break;
                 p.revNum = rev;
                 
