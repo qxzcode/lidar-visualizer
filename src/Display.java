@@ -22,7 +22,7 @@ public class Display extends JPanel {
     public ArrayList<Point> points, icpPoints;
     
     public ICP icp;
-    public static final boolean SINGLE_STEP = true;
+    public static final boolean SINGLE_STEP = false;
     
     public static final double FPS = 10;
     public Display() {
@@ -113,12 +113,14 @@ public class Display extends JPanel {
         
         if (code == KeyEvent.VK_L)
             connectPoints = !connectPoints;
-        if (code == KeyEvent.VK_I)
-            drawICP = !drawICP;
-        if (code == KeyEvent.VK_D)
-            debugICP = !debugICP;
         if (code == KeyEvent.VK_F)
             drawFrames = !drawFrames;
+        if (code == KeyEvent.VK_I)
+            drawICP = !drawICP;
+        if (code == KeyEvent.VK_T)
+            drawTowerLoc = !drawTowerLoc;
+        if (code == KeyEvent.VK_D)
+            debugICP = !debugICP;
         
         int n = code - KeyEvent.VK_0 - 1;
         if (n == -1) n = 9;
@@ -165,8 +167,9 @@ public class Display extends JPanel {
         g.drawString(str, 20, centerY*2 - font.getSize()*(textRow++) - 20);
     }
     
-    public static boolean drawFrames = false;
+    public boolean drawFrames = false;
     public boolean drawICP = false;
+    public boolean drawTowerLoc = true;
     public boolean debugICP = false;
     public boolean connectPoints = true;
     public int drawRev;
@@ -182,9 +185,9 @@ public class Display extends JPanel {
         if (mouseLoc != null) {
             drawString(g, "Mouse: ("+(int)(mouseLoc.x)+", "+(int)(mouseLoc.y)+")");
         }
+        Point towerLoc = icp.transReference.segments[0].getMidpoint();
         if (drawICP) {
-            Point mp = icp.transReference.segments[0].getMidpoint();
-            drawString(g, "ICP midpoint: ("+(int)(mp.x)+", "+(int)(mp.y)+")");
+            drawString(g, "ICP midpoint: ("+(int)(towerLoc.x)+", "+(int)(towerLoc.y)+")");
         }
         if (drawFrames) {
             int padLen = Integer.toString(numRevs).length();
@@ -224,7 +227,7 @@ public class Display extends JPanel {
             numPts++;
         }
         if (connectPoints) {
-            g.setColor(new Color(1f, 1f, 1f, 0.2f));
+            g.setColor(Color.DARK_GRAY);
             g.drawPolygon(xPts, yPts, numPts);
         }
         for (int i = 0; i < numPts; i++) {
@@ -235,6 +238,12 @@ public class Display extends JPanel {
         
         if (drawICP)
             icp.transReference.draw(g);
+        
+        if (drawTowerLoc) {
+            int[] tPos = getDrawLoc(towerLoc);
+            g.setColor(Color.MAGENTA);
+            g.fillOval(tPos[0]-10, tPos[1]-10, 20, 20);
+        }
         
         if (selectedI >= 0 && drawICP && debugICP) {
             Point p = points.get(selectedI);
@@ -265,7 +274,7 @@ public class Display extends JPanel {
             while ((str = br.readLine()) != null) {
                 String[] polar = str.split(" ");
                 double r = Double.parseDouble(polar[1]), theta = Math.toRadians(Double.parseDouble(polar[0]));
-                if (Double.isNaN(r) || Double.isNaN(theta)) throw new RuntimeException("NaN in data!");
+                if (Double.isNaN(r) || Double.isNaN(theta)) throw new RuntimeException("NaN in data! \""+str+"\"");
                 if (theta < lastTheta) rev++;
                 lastTheta = theta;
                 if (r == 0) continue;
